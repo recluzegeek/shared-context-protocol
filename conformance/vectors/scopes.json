@@ -1,0 +1,23 @@
+{
+  "description": "Scope normalization and breadth (spec §6.2, §6.2.1). 'want' is the normalized value, or null when the scope must be rejected with INVALID_ARGUMENT.",
+  "cases": [
+    { "scope": { "kind": "path", "value": "./internal//http/./guard.go" }, "want": "internal/http/guard.go", "broad": false },
+    { "scope": { "kind": "path", "value": "/internal/http/" }, "want": "internal/http/", "broad": false },
+    { "scope": { "kind": "path", "value": "internal/" }, "want": "internal/", "broad": true },
+    { "scope": { "kind": "path", "value": "README.md" }, "want": "README.md", "broad": false },
+    { "scope": { "kind": "path", "value": "/" }, "want": null },
+    { "scope": { "kind": "path", "value": "./" }, "want": null },
+    { "scope": { "kind": "path", "value": "src/../secrets" }, "want": null },
+    { "scope": { "kind": "symbol", "value": "  shop/pay.Service.Charge " }, "want": "shop/pay.Service.Charge", "broad": false },
+    { "scope": { "kind": "symbol", "value": "payments" }, "want": "payments", "broad": true },
+    { "scope": { "kind": "symbol", "value": "std::vector" }, "want": "std::vector", "broad": false },
+    { "scope": { "kind": "api", "value": "post /v1/bookings/{id}/" }, "want": "POST /v1/bookings/{}", "broad": false },
+    { "scope": { "kind": "api", "value": "GET /v1/users/:userId/trips" }, "want": "GET /v1/users/{}/trips", "broad": false },
+    { "scope": { "kind": "api", "value": "* /v1/bookings" }, "want": "* /v1/bookings", "broad": true },
+    { "scope": { "kind": "api", "value": "pay.v1.PaymentService/Charge" }, "want": "pay.v1.PaymentService/Charge", "broad": false },
+    { "scope": { "kind": "schema", "value": "Pricing.V1.Quote" }, "want": "pricing.v1.quote", "broad": false },
+    { "scope": { "kind": "topic", "value": "  Checkout-Flow " }, "want": "checkout-flow", "broad": true },
+    { "scope": { "kind": "topic", "value": "   " }, "want": null },
+    { "scope": { "kind": "module", "value": "x" }, "want": null }
+  ]
+}

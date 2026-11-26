@@ -2,7 +2,7 @@
 
 | | |
 | --- | --- |
-| **Version** | 0.4.1 ([changes](../CHANGELOG.md)) |
+| **Version** | 0.4.2 ([changes](../CHANGELOG.md)) |
 | **Status** | Published. Pre-1.0: a minor version may still break compatibility ([§15.1](#151-version-negotiation)); 1.0.0 needs two independent implementations passing the conformance suite ([§20](#20-open-issues)). |
 | **Editors** | Muhammad Salman ([recluzegeek](https://github.com/recluzegeek)) |
 | **License** | [Apache License 2.0](../LICENSE) |
@@ -334,7 +334,7 @@ A declaration, made before editing, of what a member is about to change.
 | `status` | enum | yes | `active`, `completed`, `abandoned` or `expired` ([§7.2](#72-intent)). |
 | `heartbeat_at` | timestamp | yes | Last heartbeat; set on announce. |
 | `lease_minutes` | integer | no | The lease the client asked for on announce or update. |
-| `expires_at` | timestamp | yes | The later of `heartbeat_at` + the workspace's intent TTL and the end of the lease. |
+| `expires_at` | timestamp | yes | With a lease: the end of the lease, counted from the announce, update or heartbeat that set it. Without one: `heartbeat_at` + the workspace's intent TTL. |
 | `closed_at` | timestamp | no | Set when the status leaves `active`. |
 | `revision` | integer | yes | |
 | `provenance` | [Provenance](#410-provenance) | yes | |
@@ -345,8 +345,10 @@ Agents are not daemons. Most run only while invoked, lose their context to compa
 without warning, so they can't be relied on to heartbeat on a timer. Intents therefore carry:
 
 * a **lease**: on announce or update, `lease_minutes` (1 to `intent_ttl_hours × 60`) keeps the
-  intent active that long without any heartbeat. A request for more is capped, with a
-  `lease_capped` warning. Short sessions never need to heartbeat.
+  intent active exactly that long without any heartbeat, and then it expires: the lease replaces
+  the TTL for that intent, so the intent of an agent that stopped clears when its work would have
+  ended instead of lingering for the whole TTL. A heartbeat restarts the lease. A request for more
+  is capped, with a `lease_capped` warning. Short sessions never need to heartbeat.
 * a **session**: an identifier the host generates once per agent session, or the agent obtains
   from `session.start` ([§5.2.6](#526-sessionstart)) when its host provides none, and sends on
   every announce. It lets the client close everything it announced without remembering intent ids

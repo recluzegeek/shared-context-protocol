@@ -2,6 +2,14 @@
 
 Versions follow `MAJOR.MINOR.PATCH`. Before 1.0.0, a minor version may break compatibility.
 
+## 0.4.2
+
+Correction found by building the reference server.
+
+- **Leases** (§4.4, §4.4.1): an intent with a lease expires when the lease ends; the lease replaces
+  the TTL for that intent. 0.4.1 said "the later of the lease and the TTL", which, with leases
+  capped at the TTL, made a lease unable to change anything.
+
 ## 0.4.1
 
 Additions and clarifications only, from an agent's second review; nothing in 0.4.0 breaks.

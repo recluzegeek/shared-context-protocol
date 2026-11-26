@@ -28,11 +28,25 @@ requests, and other people's words always reach an agent as data, never as instr
 | [Reference architecture](docs/architecture.md) | How a server can be built: components, storage, flows, deployment. |
 | [Integration guide](docs/integration.md) | Connecting agents, and the project-instructions snippet that makes them use SCP. |
 
+## Repository layout
+
+| Folder | What | Versioned as |
+| --- | --- | --- |
+| `spec/` | The specification. Depends on no code. | `spec/vX.Y.Z` tags |
+| `conformance/` | Language-neutral test vectors. **This, not any server, defines what correct means.** | With the spec |
+| `server/` | A reference implementation in Go: one implementation, not the implementation. Its own Go module. | `server/vX.Y.Z` tags |
+
+A second, independent implementation is welcome and is what SCP needs to reach 1.0
+([§20](spec/specification.md#20-open-issues)). Run the vectors in `conformance/` against it; where
+it and `server/` disagree, the spec and the vectors decide, not the reference server.
+
 ## Status
 
-**0.4.1, published** ([changelog](CHANGELOG.md)). No implementation yet; until 1.0, a minor version may still break compatibility. Feedback on the
-open issues in [§20 of the specification](spec/specification.md#20-open-issues) is the most
-useful contribution right now.
+**Spec 0.4.2, published** ([changelog](CHANGELOG.md)); until 1.0, a minor version may still
+break compatibility. **Reference server 0.1.0**: Core and Coordination over MCP, see
+[server/README.md](server/README.md). Feedback on the open issues in
+[§20 of the specification](spec/specification.md#20-open-issues) is the most useful contribution
+right now.
 
 ## How it differs
 

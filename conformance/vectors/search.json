@@ -1,0 +1,19 @@
+{
+  "description": "Search tokens and the minimum match (spec §5.4.3). A note must be returned when 'match' is true; servers may also return more (stemming, semantic), so 'match': false cases are only checked against the minimum matcher, never against a server's results.",
+  "tokenize": [
+    { "text": "quote_id", "tokens": ["quote", "id"] },
+    { "text": "pricing.v1.Quote", "tokens": ["pricing", "v1", "quote"] },
+    { "text": "Use POST /v1/bookings, not PUT!", "tokens": ["use", "post", "v1", "bookings", "not", "put"] },
+    { "text": "Ünïcödé-Wörds 42", "tokens": ["ünïcödé", "wörds", "42"] },
+    { "text": "  ", "tokens": [] }
+  ],
+  "match": [
+    { "query": "quote", "text": "Quote ids are q_ + random text", "match": true },
+    { "query": "quote", "text": "pricing.v1.Quote has no id field", "match": true },
+    { "query": "quote", "text": "use quote_id, not id", "match": true },
+    { "query": "quot", "text": "pricing.v1.Quote", "match": true },
+    { "query": "quote id", "text": "quote_id", "match": true },
+    { "query": "uote", "text": "quote", "match": false },
+    { "query": "quote refund", "text": "quote ids only", "match": false }
+  ]
+}

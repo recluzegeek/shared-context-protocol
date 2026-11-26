@@ -1,0 +1,20 @@
+{
+  "description": "Resource canonicalization (spec §4.7.1) with the default case-insensitive hosts. 'want' is the canonical URI, or null when the input must be rejected.",
+  "cases": [
+    { "input": "https://GitHub.com/Acme/Shop.git", "want": "git:github.com/acme/shop" },
+    { "input": "git@github.com:Acme/Shop.git", "want": "git:github.com/acme/shop" },
+    { "input": "ssh://git@github.com/Acme/Shop", "want": "git:github.com/acme/shop" },
+    { "input": "git:github.com/Acme/Shop", "want": "git:github.com/acme/shop" },
+    { "input": "https://gitlab.com/Team/Sub/Repo/", "want": "git:gitlab.com/team/sub/repo" },
+    { "input": "ssh://git@git.example.com:2222/Team/API", "want": "git:git.example.com:2222/Team/API" },
+    { "input": "https://git.example.com:443/Team/API", "want": "git:git.example.com/Team/API" },
+    { "input": "https://git.example.com:8443/Team/API.git", "want": "git:git.example.com:8443/Team/API" },
+    { "input": "ssh://git@git.example.com:22/Team/API", "want": "git:git.example.com/Team/API" },
+    { "input": "git://git.example.com/Team/API", "want": "git:git.example.com/Team/API" },
+    { "input": "git:git.example.com:2222/Team/API", "want": "git:git.example.com:2222/Team/API" },
+    { "input": "https://user:secret@github.com/Acme/Shop.git", "want": "git:github.com/acme/shop" },
+    { "input": "urn:example:service:billing", "want": "urn:example:service:billing" },
+    { "input": "not a uri", "want": null },
+    { "input": "https://github.com/", "want": null }
+  ]
+}
