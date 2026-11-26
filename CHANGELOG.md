@@ -2,6 +2,54 @@
 
 Versions follow `MAJOR.MINOR.PATCH`. Before 1.0.0, a minor version may break compatibility.
 
+## 0.3.0
+
+First published version (no longer marked draft; pre-1.0 rules still apply).
+
+- **Layering stated** (§1.4): SCP is a protocol of its own with MCP and HTTP+JSON bindings; its MCP
+  binding is a third-party MCP extension under a vendor prefix the authors control (§11.1.1.1).
+- **Bringing a team in** (§5.1.0): who creates a workspace, how people join and leave, and how
+  agents act for their person.
+
+From an agent's review of 0.2. Breaking for anyone implementing 0.2:
+
+- **Sessions and leases** (§4.4.1): intents carry a client-chosen `session` and an optional
+  `lease_minutes`, so agents that can't run a timer never need to heartbeat;
+  `intent.close_session` closes everything a session announced; heartbeat accepts a `session`.
+- **Same-member overlaps** (§6.1): one member's intents from different sessions now overlap, so
+  one person's two agents on two machines warn each other.
+- **Revisions everywhere** (§3.3): `Workspace`, `Member` and `Intent` gain `revision`; every
+  change, server-made lifecycle changes included, increments it, so it alone orders events (§13).
+- **Untrusted envelope closes its gaps** (§8): wrapping is decided by the last writer, not the
+  author; an overlap's matched `theirs` scopes, a tracker's `state` and `url`, and a handoff's
+  `response` in the outbox are wrapped; server-generated strings (overlap `reason`, errors,
+  warnings) never contain member-written text; attribution survives summarization and
+  compaction (§8.3).
+- **Git canonicalization** (§4.7.1): non-default ports are kept; paths on case-insensitive hosts
+  (`github.com`, `gitlab.com`, `bitbucket.org`, plus owner-added) are lowercased.
+- **Brief**: `truncated` names the lists that were cut; `since`/`cursor` deltas; a token for
+  `promoted`; `notes_limit` bounded by the server's page size; a no-argument brief uses
+  `WorkspaceSettings.default_resources` (§5.3.1).
+- **MCP results** (§11.1.3): the text block is a short summary, no longer a second copy of the
+  result; `structuredContent` is authoritative.
+
+Added:
+
+- **Tool sets** (§11.1.2.1): `essentials` (eight tools, the default), `full` and `admin`, granted
+  per credential, so agents load only the tools they need.
+- **Retries** (§3.3.1): `client_request_id` on every create makes retries safe.
+- **SCP version over MCP** (§15.1): the client asks for one in its per-request capabilities.
+- **Aliases** (§4.7.2) and contract-naming guidance (§6.7) for shared contracts reached under
+  different URIs.
+- **Secret detection** (§9.1): detectors listed in discovery; heuristic detectors can be set to
+  `warn` (`possible_secret` warning); owner allow-lists for documentation placeholders; format
+  detectors always reject.
+- **Warnings** have a defined code list (§5.5.4); `events.subscribe` is defined per binding
+  (§5.7).
+- **Integration guide** (`docs/integration.md`) with a project-instructions snippet.
+- Appendix A no longer promises a `schemas/` directory; per-operation schemas are an open issue,
+  and size limits live only in discovery.
+
 ## 0.2.0-draft
 
 Breaking for anyone implementing 0.1:

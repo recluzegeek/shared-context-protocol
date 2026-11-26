@@ -26,10 +26,11 @@ requests, and other people's words always reach an agent as data, never as instr
 | --- | --- |
 | [Specification](spec/specification.md) | The normative protocol: data model, operations, overlap algorithm, trust model, bindings, errors, conformance. |
 | [Reference architecture](docs/architecture.md) | How a server can be built: components, storage, flows, deployment. |
+| [Integration guide](docs/integration.md) | Connecting agents, and the project-instructions snippet that makes them use SCP. |
 
 ## Status
 
-**0.2.0-draft** ([changelog](CHANGELOG.md)). Not implemented yet. Breaking changes are expected before 1.0. Feedback on the
+**0.3.0, published** ([changelog](CHANGELOG.md)). No implementation yet; until 1.0, a minor version may still break compatibility. Feedback on the
 open issues in [§20 of the specification](spec/specification.md#20-open-issues) is the most
 useful contribution right now.
 

@@ -139,9 +139,19 @@ erDiagram
         text action
         text summary
         text work_uri
+        text session "client-chosen, nullable"
+        int lease_minutes "nullable"
         text status
+        int revision
         timestamptz heartbeat_at
         timestamptz expires_at
+    }
+    REQUEST_LOG {
+        text member_id FK
+        text client_request_id "retry key, kept 24h"
+        bytea params_hash
+        jsonb result
+        timestamptz at
     }
     INTENT_SCOPE {
         text intent_id FK
