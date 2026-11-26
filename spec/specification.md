@@ -196,7 +196,8 @@ A server **MUST** publish its limits in discovery ([§12](#12-discovery)). The m
 | Intent `summary` | 280 characters | 500 characters |
 | Handoff `done` / `needed` each | 2,000 characters | 4,000 characters |
 | References per object | 10 | 20 |
-| Scopes per intent | 10 | 25 |
+| Scopes per intent, and per dependency | 10 | 25 |
+| Dependencies (`uses`) per intent | 5 | 10 |
 | Page size | 50 | 50, maximum 100 |
 
 Characters are Unicode scalar values, not bytes.
@@ -253,6 +254,8 @@ A short fact the team should know: a decision, a pitfall, a contract detail, how
 | `refs` | [Reference](#49-reference)[] | yes | Related work, documents, changes. May be empty. |
 | `status` | enum | yes | `active`, `promoted`, `retired` or `expired` ([§7.1](#71-note)). |
 | `promoted_to` | [Reference](#49-reference) | no | Present when `status` is `promoted`. |
+| `promotion_verified` | boolean | no | Present when `status` is `promoted`: whether the server confirmed `promoted_to` exists ([§5.4.6](#546-notepromote)). |
+| `renewals` | integer | yes | Times the note was renewed ([§5.4.5](#545-noterenew)). |
 | `revision` | integer | yes | Starts at 1; +1 on each update. |
 | `expires_at` | timestamp | yes | When an `active` note expires. |
 | `provenance` | [Provenance](#410-provenance) | yes | |
@@ -265,8 +268,9 @@ A declaration, made before editing, of what a member is about to change.
 | --- | --- | --- | --- |
 | `id` | id | yes | |
 | `resource` | [Resource](#47-resource) | yes | What is being changed. |
-| `scopes` | [Scope](#48-scope)[] | yes | 1 to the server's limit. |
+| `scopes` | [Scope](#48-scope)[] | yes | 1 to the server's limit. What will change in `resource`. |
 | `action` | enum | yes | `add`, `change`, `remove`, `replace` or `rename` ([§6.3](#63-severity)). |
+| `uses` | [Dependency](#481-dependency)[] | yes | What the work relies on without changing it, in this or other resources ([§6.7](#67-cross-resource-coordination)). May be empty. |
 | `summary` | string | yes | One line, plain text. |
 | `work` | [Reference](#49-reference) | no | The work it belongs to. |
 | `status` | enum | yes | `active`, `completed`, `abandoned` or `expired` ([§7.2](#72-intent)). |
@@ -303,7 +307,9 @@ A read-only bundle assembled at request time. Servers **MUST NOT** persist brief
 | `work` | [Reference](#49-reference) | no | The work it was requested for. |
 | `resources` | [Resource](#47-resource)[] | yes | The resources it was requested for. |
 | `work_details` | [WorkDetails](#461-workdetails) | no | From an external tracker, when the server has an integration for the reference's system. |
-| `notes` | [Untrusted](#82-untrusted-text-envelope)<[Note](#43-note)>[] | yes | Active notes matching the work or resources, newest first, at most 50. |
+| `notes` | [Untrusted](#82-untrusted-text-envelope)<[Note](#43-note)>[] | yes | Active notes matching the work or resources, newest first, at most `notes_limit` ([§5.3.1](#531-briefget)). |
+| `notes_next_page_token` | string | no | Present when `notes` was cut; continue with `note.search` ([§5.3.1](#531-briefget)). |
+| `promoted` | [Untrusted](#82-untrusted-text-envelope)<[Note](#43-note)>[] | yes | Notes matching the work or resources that were promoted within the last `note_ttl_days`: pointers to where the knowledge now lives. |
 | `intents` | [Untrusted](#82-untrusted-text-envelope)<[Intent](#44-intent)>[] | yes | Other members' active intents on the resources. |
 | `my_intents` | [Intent](#44-intent)[] | yes | The principal's own active intents on the resources. |
 | `handoffs` | [Untrusted](#82-untrusted-text-envelope)<[Handoff](#45-handoff)>[] | yes | Open or acknowledged handoffs to the principal for the work or resources. |
@@ -351,6 +357,7 @@ Git remote URLs on input and **MUST** compare resources by canonical URI, byte f
 | `kind` | enum | yes | `path`, `symbol`, `api`, `schema` or `topic`. |
 | `value` | string | yes | 1–500 characters, interpreted by kind ([§6.2](#62-scope-matching)). |
 | `language` | string | no | For `symbol`: a language tag such as `go`, `python`, `typescript`. |
+| `to` | string | no | Only on scopes of a `rename` intent: the new value. Matched as well as `value` ([§6.2](#62-scope-matching)), so work already using the new name is warned too. |
 
 | Kind | `value` | Example |
 | --- | --- | --- |
@@ -359,6 +366,15 @@ Git remote URLs on input and **MUST** compare resources by canonical URI, byte f
 | `api` | An HTTP method and path template, or an RPC `service/method`. | `POST /v1/bookings`, `pay.v1.PaymentService/Charge` |
 | `schema` | A data contract element: table, column, message, field, event, topic. Dotted. | `orders.total_cents`, `pay.v1.ChargeRequest` |
 | `topic` | A free label for work that isn't one of the above. | `checkout-flow` |
+
+#### 4.8.1 Dependency
+
+Something an intent's work relies on but does not change.
+
+| Field | Type | Req. | Description |
+| --- | --- | --- | --- |
+| `resource` | [Resource](#47-resource) | yes | May differ from the intent's `resource`. |
+| `scopes` | [Scope](#48-scope)[] | yes | 1 to the server's scope limit. `to` is not allowed here. |
 
 ### 4.9 Reference
 
@@ -450,8 +466,26 @@ Returns the principal's [Member](#42-member).
 
 Params: `active?` (default `true`). Returns [Member](#42-member)[]. Any role.
 
-Member management (invite, remove, change role) is administrative and is not part of this
-version of the protocol. Servers provide it out of band ([§20](#20-open-issues)).
+#### 5.2.3 `member.invite`
+
+Owner only. Params: `handle`, `display_name`, `role`, `email?`. Creates an inactive member and
+returns it with `invite_url`: single-use, valid 7 days, through which the person obtains their
+first credential. The server **MAY** send it to `email`. Servers whose membership comes from an
+identity provider ([§10.6](#106-membership-from-an-identity-provider)) **MAY** return
+`UNSUPPORTED_OPERATION`.
+
+#### 5.2.4 `member.update`
+
+Owner only. Params: `id`, `expected_revision`, any of `role`, `display_name`. A workspace
+**MUST** keep at least one active owner; a change that would leave none fails with
+`FAILED_PRECONDITION`.
+
+#### 5.2.5 `member.remove`
+
+Owner only. Params: `id`. Sets `active: false` and revokes every credential of that member
+before returning. Their open intents are closed as `abandoned`; handoffs to them are moved to
+`expired`; their notes stay, attributed to them, until they expire. The same rules apply when an
+identity provider removes them ([§10.6](#106-membership-from-an-identity-provider)).
 
 ### 5.3 Brief
 
@@ -463,13 +497,17 @@ Params:
 | --- | --- | --- | --- |
 | `work` | [Reference](#49-reference) | no | The work the session is on. |
 | `resources` | [Resource](#47-resource)[] | no | The resources the session is on, e.g. the repository of the working directory. |
+| `notes_limit` | integer | no | 1–200, default 50. |
 
 At least one of `work` and `resources` **MUST** be present. Returns a [Brief](#46-brief):
 
-* `notes`: `active` notes whose `refs` contain `work`, or whose `resources` intersect
-  `resources`, plus workspace-wide notes (empty `resources`) when the request names a resource.
-* `intents`: other members' `active` intents whose `resource` is in `resources`, or whose `work`
-  equals `work`.
+* `notes`: exactly the first page of `note.search` with `work`, `resources`, `status: ["active"]`
+  and `page_size: notes_limit`. When cut, `notes_next_page_token` continues that search, so a
+  client can always read every note the brief left out.
+* `promoted`: notes with the same filters and `status: ["promoted"]` whose promotion is within
+  the last `note_ttl_days`, at most 20.
+* `intents`: other members' `active` intents whose `resource` is in `resources`, whose `uses`
+  name a resource in `resources`, or whose `work` equals `work`.
 * `my_intents`: the same filter, principal's own.
 * `handoffs`: `open` or `acknowledged` handoffs to the principal whose `work` equals `work` or
   whose `refs` mention a resource in `resources`.
@@ -504,11 +542,17 @@ Params:
 | `work` | [Reference](#49-reference) | no | |
 | `author` | id | no | |
 | `status` | enum[] | no | Default `["active"]`. |
+| `order` | enum | no | `newest` (default) or `relevance`. |
 
-Returns untrusted-wrapped [Note](#43-note)s. With `query`, results are ordered by relevance,
-then newest first; without it, newest first. Servers **MUST** match every whitespace-separated
-query term case-insensitively against `body` and reference titles, and **MAY** use richer
-matching (stemming, semantic ranking) as long as every result is a note the filters allow.
+Returns untrusted-wrapped [Note](#43-note)s.
+
+* **Matching.** Without `query`, every note the filters allow. With `query`, servers **MUST**
+  return every allowed note whose `body` or reference titles contain all whitespace-separated
+  query terms, case-insensitively, and **MAY** also return notes found by richer matching
+  (stemming, semantic similarity).
+* **Order.** `newest` is by `provenance.updated_at` descending, then `id`: the same on every
+  server. `relevance` is server-defined and not comparable across servers; clients that need
+  reproducible results use `newest`.
 
 #### 5.4.4 `note.update`
 
@@ -519,14 +563,22 @@ Author or owner. Params: `id`, `expected_revision`, and any of `kind`, `body`, `
 #### 5.4.5 `note.renew`
 
 Author or owner. Params: `id`, `expected_revision`. Sets `expires_at = now + note_ttl_days` on an
-`active` note. Servers **MAY** cap how many times a note can be renewed; renewal is meant for
-knowledge still waiting to be promoted, not to keep notes forever.
+`active` note and increments `renewals`. Servers **MUST** refuse a third renewal with
+`FAILED_PRECONDITION`: renewal buys time to promote knowledge, it doesn't keep notes forever.
 
 #### 5.4.6 `note.promote`
 
-Author or owner. Params: `id`, `expected_revision`, `promoted_to` ([Reference](#49-reference),
-usually `type: doc` or `change`). Sets `status: promoted`. The note remains readable and
-searchable with `status: ["promoted"]`, pointing at its durable home.
+Author or owner. Params: `id`, `expected_revision`, `promoted_to` ([Reference](#49-reference) of
+`type` `doc` or `change`; anything else fails with `INVALID_ARGUMENT`). Sets `status: promoted`.
+
+* A server with an integration for the reference's system **SHOULD** verify it before
+  promoting: that a `doc` exists, or that a `change` exists and is merged or open. A reference
+  it checked and could not find fails with `FAILED_PRECONDITION`. `promotion_verified` is
+  `true` when checked, `false` when the server has no way to check.
+* The note stays readable and searchable with `status: ["promoted"]`, and appears in briefs'
+  `promoted` list for `note_ttl_days`, so agents follow it to the durable record.
+* Owners **SHOULD** be able to list unverified promotions, which is where promotion used only to
+  silence expiry will show up.
 
 #### 5.4.7 `note.retire`
 
@@ -536,7 +588,9 @@ Author or owner. Params: `id`, `expected_revision`, `reason?`. Sets `status: ret
 
 #### 5.5.1 `intent.announce`
 
-Role `member` or `owner`. Params: `resource`, `scopes`, `action`, `summary`, `work?`, `agent?`.
+Role `member` or `owner`. Params: `resource`, `scopes`, `action`, `summary`, `uses?`, `work?`,
+`agent?`. A scope with `to` on an intent whose action isn't `rename`, or an empty `path` scope
+(the whole resource), fails with `INVALID_ARGUMENT`.
 
 Creates an `active` [Intent](#44-intent) and returns:
 
@@ -544,6 +598,7 @@ Creates an `active` [Intent](#44-intent) and returns:
 | --- | --- | --- |
 | `intent` | [Intent](#44-intent) | The new intent. |
 | `overlaps` | [Overlap](#64-overlap-object)[] | Other members' active intents it overlaps, highest severity first. Never blocks creation. |
+| `warnings` | object[] | `{code, scope}` for each scope that is `broad` ([§6.2.1](#621-broad-scopes)). Never blocks creation. |
 
 #### 5.5.2 `intent.heartbeat`
 
@@ -554,8 +609,9 @@ the call.
 
 #### 5.5.3 `intent.update`
 
-Author only. Params: `id`, `expected_revision`, any of `scopes`, `action`, `summary`, `work`.
-Returns the intent and its overlaps, recomputed.
+Author only. Params: `id`, `expected_revision`, any of `scopes`, `action`, `summary`, `uses`,
+`work`. Returns the intent, its overlaps and warnings, recomputed. Agents **SHOULD** narrow
+scopes here as their plan firms up.
 
 #### 5.5.4 `intent.close`
 
@@ -569,8 +625,8 @@ other members' wrapped as untrusted.
 
 #### 5.5.6 `intent.check`
 
-Params: `resource`, `scopes`, `action`. Returns the overlaps that **would** result, without
-creating an intent. For agents deciding whether to start.
+Params: `resource`, `scopes`, `action`, `uses?`. Returns the overlaps and warnings that
+**would** result, without creating an intent. For agents deciding whether to start.
 
 ### 5.6 Handoffs
 
@@ -620,12 +676,18 @@ the principal and the query, and **MUST** expire no sooner than 10 minutes after
 ### 6.1 When it runs
 
 The server computes overlaps on `intent.announce`, `intent.update`, `intent.heartbeat` and
-`intent.check`, between the subject intent and every `active` intent in the workspace that:
+`intent.check`, between the subject intent and every other member's `active` intent. Each intent
+has a **change side** (its `resource` and `scopes`) and a **use side** (its `uses`). A pair is
+compared in three relations:
 
-1. has the same canonical `resource`, and
-2. has a different author.
+| Relation | Compared | Same resource required |
+| --- | --- | --- |
+| `change` | Subject's change side with the other's change side | yes |
+| `breaks` | Subject's change side with the other's use side | yes, the use's `resource` |
+| `broken_by` | Subject's use side with the other's change side | yes, the use's `resource` |
 
-A member's own intents never overlap each other.
+Use sides are never compared with each other: two members relying on the same thing don't
+collide. A member's own intents never overlap each other.
 
 ### 6.2 Scope matching
 
@@ -640,22 +702,47 @@ Scopes of different kinds never match. Matching is done after normalization:
 | `schema` | Lowercase. | Equal, or one is a prefix of the other followed by `.` (a table contains its columns, a message its fields). |
 | `topic` | Lowercase, trim. | Equal. |
 
-Two intents overlap when **any** scope of one matches **any** scope of the other.
+A scope with `to` (a rename) is matched twice, once with `value` and once with `to`, and matches
+if either does.
+
+Two intents overlap when, in any relation of [§6.1](#61-when-it-runs), **any** scope of one side
+matches **any** scope of the other.
+
+#### 6.2.1 Broad scopes
+
+A scope is **broad** when, after normalization, it is:
+
+* a `path` naming a directory with fewer than two segments (`internal/`, `src/`);
+* a `symbol` containing none of `.`, `::`, `#`, `/` (a whole package or module);
+* an `api` whose method is `*`.
+
+Broad scopes are allowed, because some work really does span a directory, but they are reported
+as a `broad_scope` warning on announce, update and check, and a containment match through a
+broad scope is capped ([§6.3](#63-severity)). Without this, coarse scopes make every intent
+overlap every other, members learn to ignore overlaps, and the protocol stops being useful.
 
 ### 6.3 Severity
 
-Each overlap has a severity computed from the two actions and whether any matching pair of
-scopes is **exact** (equal after normalization) or **containment** (one contains the other):
+Each overlap has a severity computed from the relation, the two actions (a use side's action is
+`use`), and whether a matching pair of scopes is **exact** (equal after normalization) or
+**containment** (one contains the other):
 
 | Actions (either order) | Exact match | Containment |
 | --- | --- | --- |
-| `remove`, `replace` or `rename` with anything | `high` | `high` |
+| `remove`, `replace` or `rename` with anything, including `use` | `high` | `high` |
 | `change` + `change` | `high` | `normal` |
+| `change` + `use` | `normal` | `low` |
 | `change` + `add` | `normal` | `normal` |
 | `add` + `add` | `normal` | `low` |
+| `add` + `use` | no overlap | no overlap |
 
-When several scope pairs match, the overlap takes the highest severity among them. Servers
-**MUST** implement this table exactly and **MUST NOT** change severity by any other input.
+Then, in order:
+
+1. A containment match in which the **containing** scope is broad is capped at `low`.
+2. When several scope pairs match, the overlap takes the highest severity among them.
+
+Servers **MUST** implement these rules exactly and **MUST NOT** change severity by any other
+input.
 
 ### 6.4 Overlap object
 
@@ -663,7 +750,7 @@ When several scope pairs match, the overlap takes the highest severity among the
 | --- | --- | --- |
 | `intent` | [Untrusted](#82-untrusted-text-envelope)<[Intent](#44-intent)> | The other member's intent. |
 | `severity` | enum | `high`, `normal` or `low`. |
-| `matches` | object[] | Each matching pair: `{mine: Scope, theirs: Scope, match: "exact" \| "containment"}`. |
+| `matches` | object[] | Each matching pair: `{relation: "change" \| "breaks" \| "broken_by", resource: Resource, mine: Scope, theirs: Scope, match: "exact" \| "containment", broad: boolean}`. |
 | `reason` | string | A one-line, server-generated, fixed-template explanation, e.g. `"alice will remove symbol shop/payments.Service that you will change"`. |
 
 ### 6.5 What clients do with overlaps
@@ -673,7 +760,41 @@ Overlaps are advisory. A client:
 * **MUST** show `high` overlaps to its member before the agent edits code in the matched scopes;
 * **SHOULD** show `normal` overlaps;
 * **MAY** suppress `low` overlaps;
-* **MUST NOT** contact, instruct or modify the other member's intent or session in response.
+* **MUST NOT** contact, instruct or modify the other member's intent or session in response;
+* **MUST NOT** present an empty overlap list as "no conflict". The only honest statement is
+  "no overlapping intents have been announced": work that was never announced, or announced too
+  coarsely or under another resource, is invisible to the server ([§17](#17-security-considerations)).
+
+### 6.6 Declaring scopes
+
+Overlap warnings are only as good as the scopes behind them. Clients and agents **SHOULD**:
+
+* announce **before** the first edit in a scope, and again (with `intent.update`) when the plan
+  grows;
+* declare the **narrowest** scopes that cover the change, preferring `symbol`, `api` and
+  `schema` to `path`, and files to directories;
+* declare one intent per coherent change, not one per session;
+* list in `uses` the contracts the change relies on but doesn't modify;
+* narrow broad scopes as soon as the plan allows, and treat a `broad_scope` warning as a prompt to
+  do so;
+* close intents when the change lands, with the change as a reference.
+
+Clients **SHOULD** derive scopes from the agent's actual plan or edits (for example, the files in
+the working tree diff) rather than asking the model to guess them.
+
+### 6.7 Cross-resource coordination
+
+Many collisions cross resources: a service changes a shared API or message definition, and
+another service that consumes it breaks. The overlap rule only compares scopes within one
+resource, so such contracts are coordinated through the resource where they are defined:
+
+* The work that **changes** a contract announces on the contract's resource (the shared schema
+  repository, or the service that owns the API) with `api` or `schema` scopes.
+* Work that **relies on** a contract declares it in `uses`, naming that same resource and scopes.
+* The `breaks` and `broken_by` relations ([§6.1](#61-when-it-runs)) then warn both sides.
+
+A dependency nobody declares is not detected. Detecting undeclared dependencies (for example from
+build graphs or generated clients) is left to extensions ([§20](#20-open-issues)).
 
 ---
 
@@ -854,7 +975,7 @@ Credentials are sent as `Authorization: Bearer <token>` in both bindings. Server
 | Heartbeat, update an intent | own | own | |
 | Close an intent | any | own | |
 | `handoff.inbox`, `handoff.outbox`, `handoff.respond`, `handoff.withdraw` | own | own | inbox only |
-| `workspace.update` | ✓ | | |
+| `workspace.update`, `member.invite`, `member.update`, `member.remove` | ✓ | | |
 | `events.subscribe` | ✓ | ✓ | ✓ |
 
 A forbidden operation on an object the principal can see fails with `PERMISSION_DENIED`.
@@ -871,6 +992,28 @@ Servers **MUST** record every write: principal, operation, object id, timestamp,
 `AgentInfo`. Servers **SHOULD** record reads of other members' objects. Audit records **MUST NOT**
 contain object bodies. Owners **SHOULD** be able to read the audit log; the protocol does not yet
 define an operation for it ([§20](#20-open-issues)).
+
+### 10.6 Membership from an identity provider
+
+Teams that already manage people in an identity provider shouldn't manage them twice. A server
+using OAuth 2.1 / OpenID Connect **SHOULD** support deriving membership from group claims, and
+when it does, **MUST** follow these rules so that every server behaves the same:
+
+1. The workspace is configured, out of band, with a claim name (default `groups`) and a map from
+   group values to roles. A principal's role is the highest role any of its groups maps to.
+2. Membership is evaluated on **every** authenticated request. The first request of a person
+   whose groups map to a role creates their member (just-in-time), with `handle` from the
+   `preferred_username` claim, made unique.
+3. A person whose groups no longer map to any role is treated as removed
+   ([§5.2.5](#525-memberremove)) on their next request, and **MUST** be denied with
+   `UNAUTHENTICATED`. Servers **SHOULD** cap access-token lifetime at one hour so removal takes
+   effect within that time even if the person makes no request.
+4. A role change in the identity provider applies on the next request.
+5. With identity-provider membership, `member.update` **MUST NOT** change a role the identity
+   provider grants; it fails with `FAILED_PRECONDITION`.
+
+Servers **MAY** additionally accept SCIM 2.0 provisioning, applying the same rules for
+create, deactivate and role change.
 
 ---
 
@@ -897,6 +1040,8 @@ Each operation is one MCP tool. Tool names replace `.` with `_` and add the pref
 | `brief.get` | `sharedctx_brief_get` | true | false | true |
 | `workspace.get` | `sharedctx_workspace_get` | true | false | true |
 | `member.me` / `member.list` | `sharedctx_member_me` / `sharedctx_member_list` | true | false | true |
+| `member.invite` / `member.update` | `sharedctx_member_invite` / `sharedctx_member_update` | false | false | false |
+| `member.remove` | `sharedctx_member_remove` | false | true | true |
 | `note.write` | `sharedctx_note_write` | false | false | false |
 | `note.get` / `note.search` | `sharedctx_note_get` / `sharedctx_note_search` | true | false | true |
 | `note.update` / `note.renew` / `note.promote` | `sharedctx_note_update` / `sharedctx_note_renew` / `sharedctx_note_promote` | false | false | false |
@@ -978,6 +1123,9 @@ offer to users to fetch the brief and announce intents at the start of a session
 | `workspace.update` | `PATCH /` |
 | `member.me` | `GET /members/me` |
 | `member.list` | `GET /members?active=` |
+| `member.invite` | `POST /members` |
+| `member.update` | `PATCH /members/{id}` |
+| `member.remove` | `DELETE /members/{id}` |
 | `brief.get` | `POST /brief` (body: params) |
 | `note.write` | `POST /notes` |
 | `note.get` | `GET /notes/{id}` |
@@ -1036,9 +1184,17 @@ Events let a client learn about changes without polling. Servers implementing th
 | `handoff.updated` | The sender | Their handoff is acknowledged, completed, declined or expired. |
 | `note.expiring` | The author | A note enters its warning period. |
 
-Each event is `{ "id", "type", "occurred_at", "data" }`, `data` holding the object(s) concerned,
-other members' content wrapped as untrusted. Delivery is at least once; clients deduplicate by
-`id`.
+Each event is `{ "id", "type", "occurred_at", "data" }`, `data` holding the object(s) concerned
+as they were at `occurred_at`, with their `status` and `revision`, other members' content wrapped
+as untrusted.
+
+* **Delivery** is at least once; clients deduplicate by `id`.
+* **Order** is not guaranteed, and events describe the past. An `intent.overlap` can arrive after
+  one of its intents closed. Servers **MUST NOT** emit an overlap event when either intent is no
+  longer `active` at emission. Before showing an `intent.overlap` to a member, clients **MUST**
+  confirm it is current (`intent.heartbeat` on their own intent returns current overlaps), and
+  **MUST** discard an event about an object for which they have already seen a higher `revision`
+  or a later status.
 
 ### 13.1 HTTP
 
@@ -1141,13 +1297,24 @@ A conformance test suite is planned ([§20](#20-open-issues)).
 
 ## 17. Security considerations
 
+**Residual risk that no rule removes: the absence of an overlap does not mean the absence of a
+conflict.** The server only sees what members announce. Work that is never announced, announced
+late, scoped too coarsely, or that depends on something nobody declared, produces no warning, and
+a member who announced correctly then gets a false all-clear. Partial coverage of a warning system
+can create more confidence than it earns. Clients **MUST** word empty results accordingly
+([§6.5](#65-what-clients-do-with-overlaps)), and teams **SHOULD** keep their usual review and
+testing; SCP narrows the window for collisions, it doesn't close it.
+
 | Threat | Mitigation in this specification |
 | --- | --- |
 | **Prompt injection through shared content.** A member (or a compromised account, or an external tracker) writes text designed to steer other agents. | Untrusted envelope on every binding ([§8.2](#82-untrusted-text-envelope), [§11.1.4](#1114-presenting-untrusted-content)); client requirements forbid acting on it without consent ([§8.3](#83-requirements-on-clients)); author shown on every item. Residual risk: models can still be influenced; clients must keep human approval for consequential actions. |
 | **Secret leakage.** Credentials pasted into notes or handoffs spread to every agent and the server's storage. | Mandatory scanning with a minimum detector set; never storing or echoing matches ([§9.1](#91-secret-detection)); client-side pre-scanning recommended. |
 | **Impersonation.** A client claims to be another member or a trusted agent. | Author always set by the server from the credential ([§8.4](#84-requirements-on-servers)); `AgentInfo` never used for authorization ([§4.12](#412-agentinfo)). |
 | **Memory poisoning.** Wrong or outdated notes mislead agents over time. | Expiry and promotion ([§7.1](#71-note)); author and age on every note; owners can retire any note. |
-| **Overlap spoofing.** A member announces broad intents to scare others off an area. | Overlaps are advisory and attributed; owners can close any intent; intents expire without heartbeats. |
+| **Overlap spoofing.** A member announces broad intents to scare others off an area. | Overlaps are advisory and attributed; whole-resource scopes are refused and broad containment is capped at `low` ([§6.2.1](#621-broad-scopes)); owners can close any intent; intents expire without heartbeats. |
+| **Alert fatigue.** Honest but coarse scopes make every intent overlap every other, and members stop reading warnings. | `broad_scope` warnings, the broad-containment cap ([§6.3](#63-severity)), and scope guidance ([§6.6](#66-declaring-scopes)). Servers **SHOULD** let owners see each member's share of broad scopes. |
+| **Promotion used to silence expiry.** Notes marked promoted to stop the reminder, with no durable record behind them. | Promotion only to `doc` or `change` references, verified where the server can ([§5.4.6](#546-notepromote)); `promotion_verified` visible to everyone; a renewal cap. |
+| **Stale events.** An overlap shown after one side already finished. | No emission for closed intents; clients confirm before showing ([§13](#13-events)). |
 | **Cross-workspace leakage.** | Isolation with uniform `NOT_FOUND` ([§10.4](#104-workspace-isolation)); paging tokens bound to principal and query ([§5.9](#59-paging)). |
 | **Token theft.** | Per-member, per-device tokens; hashed at rest; single-member revocation; TLS ([§10.2](#102-credentials)); audit ([§10.5](#105-audit)). |
 | **Server-side request forgery** through references or tracker integrations. | References are never fetched by the protocol. A server resolving work references **MUST** only contact configured tracker hosts, never arbitrary `uri` values. |
@@ -1252,16 +1419,18 @@ Content-Type: application/json
   "intent": {
     "id": "i_19", "resource": { "uri": "git:github.com/acme/shop-api" },
     "scopes": [ { "kind": "path", "value": "internal/http/" } ],
-    "action": "change", "summary": "Validate ids in request bodies",
+    "action": "change", "summary": "Validate ids in request bodies", "uses": [],
     "work": { "type": "work", "uri": "github:acme/shop#1060" },
     "status": "active", "heartbeat_at": "2026-11-26T09:05:00Z",
     "expires_at": "2026-11-27T09:05:00Z", "provenance": { "…": "…" }
   },
+  "warnings": [],
   "overlaps": [ {
     "severity": "high",
-    "matches": [ { "mine":   { "kind": "path", "value": "internal/http/" },
+    "matches": [ { "relation": "change", "resource": { "uri": "git:github.com/acme/shop-api" },
+                   "mine":   { "kind": "path", "value": "internal/http/" },
                    "theirs": { "kind": "path", "value": "internal/http/guard.go" },
-                   "match": "containment" } ],
+                   "match": "containment", "broad": false } ],
     "reason": "bob will remove path internal/http/guard.go inside path internal/http/ that you will change",
     "intent": { "untrusted": true, "source": "member",
                 "author": { "id": "m_3", "handle": "bob", "display_name": "Bob" },
@@ -1301,20 +1470,60 @@ Content-Type: application/json
 }
 ```
 
+### 19.5 A contract change that breaks another service
+
+Dana's checkout service relies on the pricing API's quote message. She declares it in `uses`
+while working on checkout:
+
+```json
+{
+  "resource": { "uri": "git:github.com/acme/checkout" },
+  "scopes": [ { "kind": "symbol", "value": "checkout/booking.Create", "language": "go" } ],
+  "action": "change",
+  "summary": "Book from a stored quote",
+  "uses": [ {
+    "resource": { "uri": "git:github.com/acme/contracts" },
+    "scopes": [ { "kind": "schema", "value": "pricing.v1.Quote" } ]
+  } ]
+}
+```
+
+Later Erin renames a field of that message in the shared contracts repository:
+
+```json
+{
+  "resource": { "uri": "git:github.com/acme/contracts" },
+  "scopes": [ { "kind": "schema", "value": "pricing.v1.Quote.id", "to": "pricing.v1.Quote.quote_id" } ],
+  "action": "rename",
+  "summary": "Rename Quote.id to quote_id"
+}
+```
+
+Erin's announce returns an overlap with Dana's intent: relation `breaks`, `pricing.v1.Quote`
+contains `pricing.v1.Quote.id` (containment, not broad), and `rename` with `use` is `high`
+([§6.3](#63-severity)). Dana's next heartbeat returns the same overlap as `broken_by`. Neither
+change touched the other's repository; the shared contract carried the warning.
+
 ---
 
 ## 20. Open issues
 
-1. **Member administration.** Invite, remove and role changes are out of band in 0.1. Standardize?
-2. **Audit read operation** for owners.
-3. **Cross-server federation.** One team across several servers, or one member in several
+1. **Unannounced changes.** An optional extension where the server receives repository events
+   (pushes, pull requests) and reports changes to scopes no intent covered, as a measure of how
+   much work is announced at all.
+2. **Detected dependencies.** Filling `uses` from build graphs or generated clients instead of
+   declarations ([§6.7](#67-cross-resource-coordination)).
+3. **Audit read operation** for owners.
+4. **Cross-server federation.** One team across several servers, or one member in several
    workspaces through one client. Out of scope for 0.x.
-4. **Richer scopes.** Language-aware symbol matching (e.g. from an index) as an extension, keeping
+5. **Richer scopes.** Language-aware symbol matching (e.g. from an index) as an extension, keeping
    the core algorithm deterministic.
-5. **Conformance test suite** and a reference client library.
-6. **Note quality signals.** Whether members can confirm or dispute a note, and whether that
+6. **Conformance test suite, reference server and a second implementation.** A protocol with one
+   implementation is indistinguishable from an API; 1.0 requires two independent servers passing
+   the suite.
+7. **Note quality signals.** Whether members can confirm or dispute a note, and whether that
    changes anything in the protocol or stays a server feature.
-7. **A2A interoperability.** Whether a server should also publish an A2A Agent Card for handoffs
+8. **A2A interoperability.** Whether a server should also publish an A2A Agent Card for handoffs
    between teams.
 
 ---
@@ -1341,7 +1550,16 @@ Schemas use JSON Schema 2020-12. The full set is published with the specificatio
       "properties": {
         "kind": { "enum": ["path", "symbol", "api", "schema", "topic"] },
         "value": { "type": "string", "minLength": 1, "maxLength": 500 },
-        "language": { "type": "string", "maxLength": 40 }
+        "language": { "type": "string", "maxLength": 40 },
+        "to": { "type": "string", "minLength": 1, "maxLength": 500 }
+      }
+    },
+    "Dependency": {
+      "type": "object", "required": ["resource", "scopes"],
+      "properties": {
+        "resource": { "$ref": "#/$defs/Resource" },
+        "scopes": { "type": "array", "minItems": 1,
+                    "items": { "allOf": [ { "$ref": "#/$defs/Scope" }, { "not": { "required": ["to"] } } ] } }
       }
     },
     "Reference": {
@@ -1402,6 +1620,7 @@ Schemas use JSON Schema 2020-12. The full set is published with the specificatio
         "scopes": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/Scope" } },
         "action": { "enum": ["add", "change", "remove", "replace", "rename"] },
         "summary": { "type": "string", "minLength": 1 },
+        "uses": { "type": "array", "maxItems": 10, "items": { "$ref": "#/$defs/Dependency" } },
         "work": { "$ref": "#/$defs/Reference" },
         "agent": { "$ref": "#/$defs/AgentInfo" }
       }
@@ -1443,6 +1662,12 @@ inputs.
 | `url_credentials` | A URL with a non-empty password: `[a-z][a-z0-9+.-]*://[^/\s:@]+:[^/\s@]+@` |
 | `assigned_secret` | `(password\|passwd\|secret\|token\|api[_-]?key\|client[_-]?secret)\s*[:=]\s*["']?[^\s"']{8,}` (case-insensitive), excluding obvious placeholders such as `<…>`, `${…}`, `****`, `changeme`, `example` |
 | `high_entropy` | A run of 32+ base64 or hex characters with Shannon entropy above 4.0 bits per character for base64 or 3.0 for hex, adjacent to one of the keywords in `assigned_secret` |
+
+The keyword requirement on `high_entropy` is a deliberate trade-off: without it, hashes, commit
+ids and identifiers that notes legitimately carry would be refused. A bare key of an unknown
+format with no keyword nearby is therefore **not** caught by this minimum set. Servers **SHOULD**
+add provider-specific detectors for the credentials their teams use, and clients **SHOULD**
+pre-scan with a broader tool.
 
 ---
 

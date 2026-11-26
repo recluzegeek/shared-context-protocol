@@ -145,9 +145,13 @@ erDiagram
     }
     INTENT_SCOPE {
         text intent_id FK
+        text side "change | use"
+        text resource_uri "the intent's, or the dependency's"
         text kind
         text value_norm "normalized per §6.2"
+        text to_norm "rename target, nullable"
         text language
+        bool broad "per §6.2.1"
     }
     HANDOFF {
         text id PK
@@ -178,7 +182,8 @@ Indexes that matter:
 | Query | Index |
 | --- | --- |
 | Active intents on a resource (overlap, brief) | `intent (workspace_id, resource_uri) WHERE status = 'active'` |
-| Scope candidates | `intent_scope (kind, value_norm text_pattern_ops)` for prefix lookups |
+| Change and use sides on a resource | `intent_scope (resource_uri, side, kind)` |
+| Scope candidates | `intent_scope (kind, value_norm text_pattern_ops)` and `(kind, to_norm)` for prefix lookups |
 | Brief notes | GIN on `note.resource_uris`, GIN on `note.work_uris`, both `WHERE status = 'active'` |
 | Search | GIN on `note.search` |
 | Sweeper | `note (expires_at) WHERE status = 'active'`, same for intents and handoffs |
@@ -190,22 +195,25 @@ them and matches in memory; the scope index narrows candidates when a resource h
 
 ```mermaid
 flowchart TD
-    S["subject intent<br/>(announce, update, heartbeat, check)"] --> N["normalize scopes (§6.2)"]
-    N --> Q["load active intents:<br/>same workspace, same resource,<br/>other authors"]
-    Q --> L{"for each pair of scopes<br/>same kind?"}
+    S["subject intent<br/>(announce, update, heartbeat, check)"] --> N["normalize scopes, mark broad<br/>(§6.2, §6.2.1)"]
+    N --> Q["load other members' active intents<br/>whose change or use side shares a resource<br/>with the subject's change or use side"]
+    Q --> P["pairs by relation (§6.1):<br/>change↔change, change→use (breaks),<br/>use→change (broken_by); never use↔use"]
+    P --> L{"same kind?"}
     L -- no --> X["no match"]
-    L -- yes --> M{"match by kind rule"}
+    L -- yes --> M{"match by kind rule<br/>(value, and to for renames)"}
     M -- "equal" --> E["exact"]
     M -- "contains" --> C["containment"]
     M -- no --> X
     E --> SV["severity table (§6.3)"]
-    C --> SV
-    SV --> R["overlap: highest severity,<br/>matched pairs, fixed-template reason"]
+    C --> CAP{"containing scope broad?"}
+    CAP -- yes --> LOW["cap at low"] --> SV
+    CAP -- no --> SV
+    SV --> R["overlap: highest severity,<br/>matched pairs with relation,<br/>fixed-template reason"]
 ```
 
 The domain function has the shape
 `overlaps(subject Intent, others []Intent) []Overlap`: pure, deterministic, and table-tested
-against every row of §6.2 and §6.3.
+against every row of §6.2 and §6.3, every relation of §6.1, and the broad cap.
 
 ## 5. Flows
 
@@ -366,7 +374,8 @@ shared-context-protocol/
 
 | Layer | What |
 | --- | --- |
-| Domain | Table tests for every §6.2 matching rule and §6.3 severity cell; lifecycle transitions in §7, including illegal ones |
+| Domain | Table tests for every §6.2 matching rule, rename `to` matching, every §6.1 relation, every §6.3 severity cell and the broad cap; lifecycle transitions in §7, including illegal ones; the renewal cap |
+| Membership | Identity-provider group changes (§10.6): join, role change, removal denied on the next request, open intents closed |
 | Content safety | Each Appendix B detector, plus placeholders that must pass |
 | Bindings | The same operation through MCP and HTTP returns the same result and errors |
 | Isolation | Every operation with another workspace's ids returns `NOT_FOUND` |
