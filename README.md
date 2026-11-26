@@ -30,7 +30,7 @@ requests, and other people's words always reach an agent as data, never as instr
 
 ## Status
 
-**0.4.0, published** ([changelog](CHANGELOG.md)). No implementation yet; until 1.0, a minor version may still break compatibility. Feedback on the
+**0.4.1, published** ([changelog](CHANGELOG.md)). No implementation yet; until 1.0, a minor version may still break compatibility. Feedback on the
 open issues in [§20 of the specification](spec/specification.md#20-open-issues) is the most
 useful contribution right now.
 

@@ -2,7 +2,7 @@
 
 | | |
 | --- | --- |
-| **Version** | 0.4.0 ([changes](../CHANGELOG.md)) |
+| **Version** | 0.4.1 ([changes](../CHANGELOG.md)) |
 | **Status** | Published. Pre-1.0: a minor version may still break compatibility ([§15.1](#151-version-negotiation)); 1.0.0 needs two independent implementations passing the conformance suite ([§20](#20-open-issues)). |
 | **Editors** | Muhammad Salman ([recluzegeek](https://github.com/recluzegeek)) |
 | **License** | [Apache License 2.0](../LICENSE) |
@@ -330,7 +330,7 @@ A declaration, made before editing, of what a member is about to change.
 | `uses` | [Dependency](#481-dependency)[] | yes | What the work relies on without changing it, in this or other resources ([§6.7](#67-cross-resource-coordination)). May be empty. |
 | `summary` | string | yes | One line, plain text. |
 | `work` | [Reference](#49-reference) | no | The work it belongs to. |
-| `session` | string | no | The agent session that announced it: 1–128 characters the client chooses, stable for the life of that session ([§4.4.1](#441-sessions-and-leases)). |
+| `session` | string | no | The agent session that announced it: 1–128 characters, chosen by the client or issued by `session.start`, stable for the life of that session ([§4.4.1](#441-sessions-and-leases)). |
 | `status` | enum | yes | `active`, `completed`, `abandoned` or `expired` ([§7.2](#72-intent)). |
 | `heartbeat_at` | timestamp | yes | Last heartbeat; set on announce. |
 | `lease_minutes` | integer | no | The lease the client asked for on announce or update. |
@@ -347,13 +347,15 @@ without warning, so they can't be relied on to heartbeat on a timer. Intents the
 * a **lease**: on announce or update, `lease_minutes` (1 to `intent_ttl_hours × 60`) keeps the
   intent active that long without any heartbeat. A request for more is capped, with a
   `lease_capped` warning. Short sessions never need to heartbeat.
-* a **session**: an identifier the client generates once per agent session and sends on every
-  announce. It lets the client close everything it announced without remembering intent ids
+* a **session**: an identifier the host generates once per agent session, or the agent obtains
+  from `session.start` ([§5.2.6](#526-sessionstart)) when its host provides none, and sends on
+  every announce. It lets the client close everything it announced without remembering intent ids
   (`intent.close_session`, [§5.5.8](#558-intentclose_session)), and it lets two sessions of the
   **same member** (two machines, two agents) see each other's overlaps ([§6.1](#61-when-it-runs)).
 
 Clients **SHOULD** send both. A client that can run code at session end **SHOULD** call
-`intent.close_session` there.
+`intent.close_session` there. Agents don't need to watch the clock: a `lease_expiring` warning
+arrives with whatever call they make next ([§5.5.4](#554-warnings)).
 
 ### 4.5 Handoff
 
@@ -388,8 +390,10 @@ A read-only bundle assembled at request time. Servers **MUST NOT** persist brief
 | `promoted` | [Untrusted](#82-untrusted-text-envelope)<[Note](#43-note)>[] | yes | Notes matching the work or resources that were promoted within the last `note_ttl_days`: pointers to where the knowledge now lives. At most 20. |
 | `promoted_next_page_token` | string | no | Present when `promoted` was cut; continue with `note.search` ([§5.3.1](#531-briefget)). |
 | `intents` | [Untrusted](#82-untrusted-text-envelope)<[Intent](#44-intent)>[] | yes | Other members' active intents on the resources. |
+| `intents_next_page_token` | string | no | Present when `intents` was cut; continue with `intent.list` ([§5.5.6](#556-intentlist)). |
 | `my_intents` | [Intent](#44-intent)[] | yes | The principal's own active intents on the resources. |
 | `handoffs` | [Untrusted](#82-untrusted-text-envelope)<[Handoff](#45-handoff)>[] | yes | Open or acknowledged handoffs to the principal for the work or resources. |
+| `handoffs_next_page_token` | string | no | Present when `handoffs` was cut; continue with `handoff.inbox` ([§5.6.2](#562-handoffinbox)). |
 | `expiring_notes` | [Note](#43-note)[] | yes | The principal's own notes within `note_warn_days` of expiry. |
 | `generated_at` | timestamp | yes | |
 | `truncated` | string[] | yes | Names of the lists that were cut (`notes`, `promoted`, `intents`, `handoffs`); empty when nothing was. |
@@ -598,6 +602,18 @@ before returning. Their open intents are closed as `abandoned`; handoffs to them
 `expired`; their notes stay, attributed to them, until they expire. The same rules apply when an
 identity provider removes them ([§10.6](#106-membership-from-an-identity-provider)).
 
+#### 5.2.6 `session.start`
+
+Role `member` or `owner`. Params: `label?` (at most 100 characters, e.g. the agent and machine),
+`agent?`. Returns `{session, started_at}`, where `session` is a new identifier issued by the
+server, valid as an intent's `session` ([§4.4.1](#441-sessions-and-leases)).
+
+For agents whose host doesn't give them a session id: call it once at the start, then send the
+result on every announce. It creates nothing else and needs no closing; a session ends when
+`intent.close_session` is called or its intents expire. An agent that lost the id to compaction
+finds it again with `intent.list` filtered to itself ([§5.5.6](#556-intentlist)). A
+client-chosen `session` remains valid; this only removes the need for the host to make one.
+
 ### 5.3 Brief
 
 #### 5.3.1 `brief.get`
@@ -761,9 +777,11 @@ Author only. Params: `id`, `expected_revision`, any of `scopes`, `action`, `summ
 | `lease_capped` | The lease asked for was longer than the workspace allows; `detail` gives the lease granted, in minutes. |
 | `no_session` | The intent has no `session`, so it can't be closed with its session and won't overlap the member's other sessions. |
 | `topic_only` | Every scope of the intent is a `topic`; its overlaps are capped at `low` ([§6.2.1](#621-broad-scopes)). |
+| `lease_expiring` | One of the principal's active intents expires within 15 minutes or a tenth of its lease, whichever is longer; `detail` gives the intent id and `expires_at`. Added to the result of **any** call by the principal, so an agent learns about it from whatever it does next, without watching a clock ([§4.4.1](#441-sessions-and-leases)). |
 | `possible_secret` | A heuristic secret detector in `warn` mode matched; `detail` names the field and detector ([§9.1](#91-secret-detection)). Returned by any write, in a top-level `warnings` list next to the created or updated object. |
 
-New codes may be added in minor versions ([§15.2](#152-forward-compatibility)).
+New codes may be added in minor and patch versions ([§15.1](#151-version-negotiation)); clients
+treat unknown codes as informational.
 
 #### 5.5.5 `intent.close`
 
@@ -773,7 +791,10 @@ that landed it). Sets the status and `closed_at`.
 #### 5.5.6 `intent.list`
 
 Params: `resources?`, `work?`, `author?`, `session?`, `status?` (default `["active"]`). Returns
-intents, other members' wrapped as untrusted.
+intents, other members' wrapped as untrusted. `resources` matches an intent whose `resource`
+**or** any `uses` resource is in the list; `resources` and `work` together match either, exactly
+the brief's filter ([§5.3.1](#531-briefget)), so a cut brief list can be continued here. With
+`author` set to the principal, it also recovers session ids an agent lost to compaction.
 
 #### 5.5.7 `intent.check`
 
@@ -798,8 +819,9 @@ Returns the `open` [Handoff](#45-handoff) with `expires_at = now + handoff_ttl_d
 
 #### 5.6.2 `handoff.inbox`
 
-Params: `status?` (default `["open", "acknowledged"]`). Returns untrusted-wrapped handoffs to
-the principal, oldest first.
+Params: `status?` (default `["open", "acknowledged"]`), `work?`, `resources?`. Returns
+untrusted-wrapped handoffs to the principal, oldest first. `work` and `resources` filter exactly
+as the brief does ([§5.3.1](#531-briefget)), so a cut brief list can be continued here.
 
 #### 5.6.3 `handoff.outbox`
 
@@ -1221,6 +1243,7 @@ Credentials are sent as `Authorization: Bearer <token>` in both bindings. Server
 | `workspace.update`, `member.invite`, `member.update`, `member.remove` | ✓ | | |
 | `events.subscribe` (binding-defined, [§5.7](#57-events)) | ✓ | ✓ | ✓ |
 | `intent.close_session` | own | own | |
+| `session.start` | ✓ | ✓ | |
 
 A forbidden operation on an object the principal can see fails with `PERMISSION_DENIED`.
 
@@ -1321,6 +1344,7 @@ The **Set** column says which tool set it belongs to ([§11.1.2.1](#11121-tool-s
 | Operation | Tool | Set | `readOnlyHint` | `destructiveHint` | `idempotentHint` |
 | --- | --- | --- | --- | --- | --- |
 | `brief.get` | `sharedctx_brief_get` | essentials | true | false | true |
+| `session.start` | `sharedctx_session_start` | essentials | false | false | false |
 | `intent.check` | `sharedctx_intent_check` | essentials | true | false | true |
 | `intent.announce` | `sharedctx_intent_announce` | essentials | false | false | false |
 | `intent.close` | `sharedctx_intent_close` | essentials | false | false | true |
@@ -1328,7 +1352,7 @@ The **Set** column says which tool set it belongs to ([§11.1.2.1](#11121-tool-s
 | `note.write` | `sharedctx_note_write` | essentials | false | false | false |
 | `note.search` | `sharedctx_note_search` | essentials | true | false | true |
 | `handoff.inbox` | `sharedctx_handoff_inbox` | essentials | true | false | true |
-| `intent.heartbeat` | `sharedctx_intent_heartbeat` | full | false | false | true |
+| `intent.heartbeat` | `sharedctx_intent_heartbeat` | full | false | false | false |
 | `intent.update` | `sharedctx_intent_update` | full | false | false | false |
 | `intent.list` | `sharedctx_intent_list` | full | true | false | true |
 | `note.get` | `sharedctx_note_get` | full | true | false | true |
@@ -1343,14 +1367,18 @@ The **Set** column says which tool set it belongs to ([§11.1.2.1](#11121-tool-s
 | `member.invite` / `member.update` | `sharedctx_member_invite` / `sharedctx_member_update` | admin | false | false | false |
 | `member.remove` | `sharedctx_member_remove` | admin | false | true | true |
 
-Each tool **MUST** declare an `inputSchema` equal to the operation's parameters
-([Appendix A](#appendix-a-json-schemas)) and an `outputSchema` equal to its result. Tool
+Each tool **MUST** declare an `inputSchema` and **SHOULD** declare an `outputSchema`, describing
+the operation's parameters and result. Once the per-operation schemas are published
+([Appendix A](#appendix-a-json-schemas), [§20](#20-open-issues)), both **MUST** be those schemas
+verbatim; until then they are derived from [§4](#4-data-model) and [§5](#5-operations), and
+clients **MUST NOT** reject a result for fields its `outputSchema` doesn't list. Tool
 descriptions **SHOULD** tell the model when to call the tool (for example, "Call before editing
 files to announce what you will change"), and **MUST NOT** contain workspace content.
 
 Every tool declares `openWorldHint: false`, except `sharedctx_brief_get`, which declares `true`
 when the server reads external trackers for it. Clients treat these annotations as hints, never as
-guarantees, as MCP requires.
+guarantees, as MCP requires. `idempotentHint` keeps MCP's meaning (a repeat call has no further
+effect); a tool can be safe to retry without being idempotent, as `intent.heartbeat` is.
 
 ##### 11.1.2.1 Tool sets
 
@@ -1360,7 +1388,7 @@ credential is granted one of them:
 
 | Set | Tools | For |
 | --- | --- | --- |
-| `essentials` | The eight marked essentials above | Day-to-day agent sessions. The default for new credentials. |
+| `essentials` | The nine marked essentials above | Day-to-day agent sessions. The default for new credentials. |
 | `full` | Essentials and every tool marked full | Members who curate notes, run long sessions or post handoffs. |
 | `admin` | Full and the admin tools | Owners managing the workspace. |
 
@@ -1371,6 +1399,12 @@ than the member's role allows ([§10.3](#103-roles)): a `guest` gets the read-on
 set, and only an `owner` can hold `admin`. A tool outside the credential's set is not listed, and
 calling it fails with `PERMISSION_DENIED`. Everything a set leaves out stays reachable through
 the HTTP+JSON binding and the brief.
+
+A session that needs a tool outside its set mid-way (posting a handoff from `essentials`)
+widens its authorization, not its connection: an OAuth client requests the larger scope through
+incremental consent, and the server, which sees the new token on the next request, sends
+`notifications/tools/list_changed` on any open `subscriptions/listen` stream so the client
+reloads the list. Servers **MAY** support this; `essentials` stays the default either way.
 
 #### 11.1.3 Results
 
@@ -1448,6 +1482,7 @@ offer to users to fetch the brief and announce intents at the start of a session
 | `workspace.get` | `GET /` |
 | `workspace.update` | `PATCH /` |
 | `member.me` | `GET /members/me` |
+| `session.start` | `POST /sessions` |
 | `member.list` | `GET /members?active=` |
 | `member.invite` | `POST /members` |
 | `member.update` | `PATCH /members/{id}` |
@@ -1603,7 +1638,10 @@ fields, operations, enum values and profiles.
   with `UNSUPPORTED_VERSION` and `details.supported`. Every result's `_meta` names the version
   used. MCP's own version is negotiated separately, per request, as MCP defines.
 
-Before 1.0, any minor version may break compatibility.
+Before 1.0, any minor version may break compatibility, and patch versions never do: a patch
+(`0.4.0` → `0.4.1`) only adds optional fields, operations, tools, warning codes and events, and
+clarifies text. The negotiated version stays `MAJOR.MINOR`; additions in a patch are found the way
+unknown fields are ([§15.2](#152-forward-compatibility)), so clients don't need to ask for them.
 
 ### 15.2 Forward compatibility
 
@@ -2015,7 +2053,7 @@ and published in discovery ([§3.4](#34-limits)).
     "Warning": {
       "type": "object", "required": ["code"],
       "properties": {
-        "code": { "type": "string", "description": "broad_scope | topic_only | lease_capped | no_session | possible_secret; new codes may appear in minor versions" },
+        "code": { "type": "string", "description": "broad_scope | topic_only | lease_capped | lease_expiring | no_session | possible_secret; new codes may appear in minor and patch versions" },
         "scope": { "$ref": "#/$defs/Scope" },
         "detail": { "type": "string" }
       }

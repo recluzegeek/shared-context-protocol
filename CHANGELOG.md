@@ -2,6 +2,27 @@
 
 Versions follow `MAJOR.MINOR.PATCH`. Before 1.0.0, a minor version may break compatibility.
 
+## 0.4.1
+
+Additions and clarifications only, from an agent's second review; nothing in 0.4.0 breaks.
+
+- **Patch versions never break** (§15.1): before 1.0, a patch only adds optional fields,
+  operations, tools, warning codes and events, and clarifies text.
+- **`session.start`** (§5.2.6, essentials tool): a server-issued session id for agents whose host
+  provides none; lost ids are recovered with `intent.list` filtered to oneself. The integration
+  guide no longer depends on a harness-injected `$SCP_SESSION`.
+- **`lease_expiring` warning** (§5.5.4): attached to the result of any call while one of the
+  principal's intents is close to expiry, so agents notice without watching a clock.
+- **Every cut brief list can be continued**: `intents_next_page_token` and
+  `handoffs_next_page_token`; `intent.list` defines `resources` as matching the change or use side
+  (the brief's filter), and `handoff.inbox` gains `work` and `resources` filters.
+- **Widening a tool set mid-session** (§11.1.2.1): incremental OAuth consent plus
+  `notifications/tools/list_changed`; optional, `essentials` stays the default.
+- **Tool schemas** (§11.1.2): `outputSchema` is SHOULD until per-operation schemas are published,
+  and clients must not reject results for unlisted fields.
+- **`intent.heartbeat`** is no longer marked `idempotentHint` (it renews timestamps each call);
+  the binding notes the difference between idempotent and safe to retry.
+
 ## 0.4.0
 
 From a reviewer's read of 0.3. Breaking for anyone implementing 0.3:
