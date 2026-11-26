@@ -29,13 +29,15 @@ requests, and other people's words always reach an agent as data, never as instr
 
 ## Status
 
-**0.1.0-draft.** Not implemented yet. Breaking changes are expected before 1.0. Feedback on the
+**0.2.0-draft** ([changelog](CHANGELOG.md)). Not implemented yet. Breaking changes are expected before 1.0. Feedback on the
 open issues in [§20 of the specification](spec/specification.md#20-open-issues) is the most
 useful contribution right now.
 
 ## How it differs
 
-* **MCP** connects one agent to tools. SCP is a set of MCP tools whose data is shared by a team.
+* **MCP** connects one agent to tools. SCP is an MCP extension whose data is shared by a team.
+* **ACP** (Agent Client Protocol) connects an editor to its coding agent. SCP is what the team's
+  agents share; an ACP client hands the SCP server to its agent like any MCP server.
 * **A2A** lets agents delegate tasks while keeping their memory private. SCP shares context
   among people and their agents, and never delegates actions.
 * **Vendor shared workspaces** do this for one vendor's agents in one vendor's cloud. SCP is

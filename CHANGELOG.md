@@ -1,0 +1,57 @@
+# Changelog
+
+Versions follow `MAJOR.MINOR.PATCH`. Before 1.0.0, a minor version may break compatibility.
+
+## 0.2.0-draft
+
+Breaking for anyone implementing 0.1:
+
+- **Overlap rules** (§6): intents gain `uses` (dependencies, possibly in other resources), and
+  overlaps are compared in three relations: `change`, `breaks`, `broken_by`. New severity rows
+  for `use`. Renames carry `to` and match on both names.
+- **Broad scopes** (§6.2.1): whole-resource `path` scopes are refused; broad scopes return a
+  `broad_scope` warning, and containment through a broad scope is capped at `low`.
+- **Overlap object**: each match carries `relation`, `resource` and `broad`.
+- **Notes**: renewal capped at two (`renewals` field); promotion only to `doc` or `change`
+  references, verified where possible (`promotion_verified`).
+- **Brief**: `notes_limit`, `notes_next_page_token` and `promoted`; brief notes are defined as the
+  first page of `note.search`.
+- **Search**: `order` parameter; `newest` is the default and identical on every server.
+- **Events**: no ordering guarantee; no overlap events for closed intents; clients confirm before
+  showing.
+
+Added:
+
+- Member administration: `member.invite`, `member.update`, `member.remove` (§5.2).
+- Membership from an identity provider's groups, evaluated on every request (§10.6).
+- Scope guidance (§6.6) and cross-resource coordination (§6.7).
+- Clients must not present an empty overlap list as "no conflict" (§6.5); §17 states the residual
+  risk.
+- Example §19.5: a contract rename warning a dependent service.
+
+Aligned with the Model Context Protocol and Agent Client Protocol versions now pinned in §1.5:
+
+- **Normative references** (§1.5): every external specification pinned once, with an exact
+  version; the body refers to them by name, and the spec carries no dates of its own.
+- **MCP binding** (§11.1.1): targets the pinned MCP version (no handshake, per-request version and
+  capabilities, `server/discover`, stateless); older MCP versions served as "dual-era".
+- **SCP is an MCP extension** (§11.1.1.1), `io.github.recluzegeek/sharedctx`, advertised in
+  `server/discover`; the SCP version moves from the removed `initialize` result to the extension
+  entry and every result's `_meta` (§15.1). Discovery lists it with the MCP versions served (§12).
+- **Events over MCP** (§13.2): the MCP Events extension where both sides support it; otherwise
+  resource notifications on `subscriptions/listen` (replacing `resources/subscribe`).
+- **Authorization** (§10.2): OAuth exactly as the pinned MCP version (Protected Resource Metadata,
+  PKCE S256, resource indicators, `iss` check, audience validation, Client ID Metadata Documents);
+  no token passthrough to trackers.
+- **Local agents** (§11.1.1.2): a stdio bridge for hosts that only start stdio MCP servers.
+- **Hosts that build prompts** (§11.1.4), e.g. ACP clients, never put SCP content in system
+  prompts; they pass it as embedded resources.
+- **Tools** (§11.1.2): `openWorldHint`, tool lists vary only by authorization; errors follow MCP's
+  tool-error guidance (§11.1.3).
+- **Subagents** act for the same member (§10.1); W3C Trace Context recorded with audit (§10.5).
+- Extension identifiers use MCP's `{vendor-prefix}/{name}` format (§15.3).
+
+## 0.1.0-draft
+
+First draft: data model, operations, deterministic overlap detection, trust model, content
+safety, MCP and HTTP+JSON bindings, discovery, events, errors, conformance.

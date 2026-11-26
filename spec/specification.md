@@ -2,9 +2,8 @@
 
 | | |
 | --- | --- |
-| **Version** | 0.1.0-draft |
+| **Version** | 0.2.0-draft ([changes](../CHANGELOG.md)) |
 | **Status** | Draft. Breaking changes are expected before 1.0.0. |
-| **Date** | 2026-11-26 |
 | **Editors** | Muhammad Salman ([recluzegeek](https://github.com/recluzegeek)) |
 | **License** | [Apache License 2.0](../LICENSE) |
 
@@ -104,6 +103,37 @@ and write to, so that
 [§4](#4-data-model) defines the objects, [§5](#5-operations) the abstract operations on them, and
 [§11](#11-protocol-bindings) how those operations map to concrete wire formats. A server
 implements the abstract operations once and exposes them through one or more bindings.
+
+### 1.5 Normative references
+
+Every external specification this document depends on is pinned here, once. The rest of the
+document refers to them by name; "the pinned version" always means the version in this table.
+Moving to a newer version of any of them is a change to this specification and gets an SCP
+version of its own.
+
+| Specification | Pinned version | Used for |
+| --- | --- | --- |
+| Model Context Protocol | Protocol version `2026-07-28` (MCP's version identifiers are date-formatted strings; this is the literal sent on the wire) | MCP binding ([§11.1](#111-mcp-binding-required)), authorization ([§10.2](#102-credentials)) |
+| Model Context Protocol, earlier versions served | `2025-11-25`, `2025-06-18` | Clients that lag behind ([§11.1.1](#1111-transport-and-mcp-version)) |
+| MCP Events extension | Identifier `io.modelcontextprotocol/events`, as published with the pinned MCP version | Events over MCP ([§13.2](#132-mcp)) |
+| Agent Client Protocol | Protocol version `1` (schema `1.35.0`) | Interoperability notes ([§10.1](#101-principals), [§11.1.1.2](#11112-local-agents-stdio), [§11.1.4](#1114-presenting-untrusted-content)) |
+| JSON-RPC | 2.0 | MCP binding |
+| JSON | RFC 8259 | All bindings |
+| JSON Schema | Draft 2020-12 | [Appendix A](#appendix-a-json-schemas), tool schemas |
+| OAuth | 2.1, as profiled by the pinned MCP version's authorization specification | [§10.2](#102-credentials) |
+| OAuth Protected Resource Metadata | RFC 9728 | [§10.2](#102-credentials) |
+| OAuth Resource Indicators | RFC 8707 | [§10.2](#102-credentials) |
+| OAuth Authorization Server Issuer Identification | RFC 9207 | [§10.2](#102-credentials) |
+| OpenID Connect | Core 1.0 | [§10.6](#106-membership-from-an-identity-provider) |
+| SCIM | 2.0 (RFC 7643, RFC 7644) | [§10.6](#106-membership-from-an-identity-provider) |
+| TLS | 1.2 (RFC 5246) minimum; 1.3 (RFC 8446) recommended | [§10.2](#102-credentials) |
+| W3C Trace Context | Level 1 | [§10.5](#105-audit) |
+| Date and time | RFC 3339 | All timestamps |
+| URI | RFC 3986 | [§4.7](#47-resource), [§4.9](#49-reference) |
+| UTF-8 | RFC 3629 | [§9.2](#92-size-and-form) |
+| CommonMark | 0.31.2 | Note bodies ([§9.4](#94-rendering)) |
+| Requirement key words | BCP 14 (RFC 2119, RFC 8174) | Throughout |
+| Server-Sent Events | WHATWG HTML Living Standard (unversioned) | [§13.1](#131-http) |
 
 ---
 
@@ -946,15 +976,26 @@ Bodies may be CommonMark. Clients rendering them for people **MUST** disable raw
 ### 10.1 Principals
 
 Every request is authenticated as exactly one member of exactly one workspace. Agents have no
-identity of their own; [AgentInfo](#412-agentinfo) is a label.
+identity of their own; [AgentInfo](#412-agentinfo) is a label. Subagents an agent starts (as
+agent hosts such as ACP allow) act for the same member with the same credential; they **MAY** say
+so in `AgentInfo`, and are never a separate principal.
 
 ### 10.2 Credentials
 
 A server **MUST** support at least one of:
 
-* **OAuth 2.1** with the authorization flow defined by the MCP authorization specification, the
-  access token bound to one member; or
-* **Personal access tokens**: opaque bearer tokens issued to one member for one workspace.
+* **OAuth 2.1**, exactly as the pinned MCP version's authorization specification
+  ([§1.5](#15-normative-references)) defines it for the MCP binding: the SCP
+  server is an OAuth resource server; it publishes Protected Resource Metadata (RFC 9728);
+  clients use PKCE with `S256`, the `resource` parameter (RFC 8707) and the `iss` check
+  (RFC 9207); the server validates the token's audience; clients register by pre-registration or
+  Client ID Metadata Documents in preference to dynamic registration. The access token is bound
+  to one member. The HTTP+JSON binding accepts the same tokens.
+* **Personal access tokens**: opaque bearer tokens issued to one member for one workspace, for
+  clients and bridges ([§11.1.1.2](#11112-local-agents-stdio)) that can't run an OAuth flow.
+
+A server **MUST NOT** pass a member's token on to any other service (trackers included); it uses
+its own credentials there, as MCP forbids token passthrough.
 
 Credentials are sent as `Authorization: Bearer <token>` in both bindings. Servers:
 
@@ -993,6 +1034,10 @@ Servers **MUST** record every write: principal, operation, object id, timestamp,
 contain object bodies. Owners **SHOULD** be able to read the audit log; the protocol does not yet
 define an operation for it ([§20](#20-open-issues)).
 
+Servers **SHOULD** accept W3C Trace Context ([§1.5](#15-normative-references)) (`traceparent`, `tracestate`) from the HTTP headers or
+the MCP `_meta` keys MCP defines for it, record the trace id with the audit entry, and propagate it
+to tracker calls, so a member's agent session can be followed across systems.
+
 ### 10.6 Membership from an identity provider
 
 Teams that already manage people in an identity provider shouldn't manage them twice. A server
@@ -1024,12 +1069,37 @@ expose the same operations with the same semantics, limits and errors.
 
 ### 11.1 MCP binding (required)
 
-#### 11.1.1 Transport
+#### 11.1.1 Transport and MCP version
 
-The server is an MCP server using the Streamable HTTP transport, at the URL published in
-discovery. It **MUST** support MCP protocol version `2025-06-18` or later, and **MUST** declare
-the `tools` capability. It **SHOULD** declare `resources` with `subscribe` for events
-([§13.2](#132-mcp)).
+The server is a remote MCP server using the Streamable HTTP transport, at the URL published in
+discovery. It:
+
+* **MUST** implement the pinned MCP version ([§1.5](#15-normative-references)): no initialization
+  handshake, protocol version and client capabilities in every request's `_meta`,
+  `server/discover`, and no reliance on earlier requests on the same connection;
+* **SHOULD** also serve clients on the earlier MCP versions listed in
+  [§1.5](#15-normative-references) (the "dual-era" behaviour MCP defines), since many agents will
+  lag behind;
+* **MUST** validate the `Origin` header and the `MCP-Protocol-Version` header as MCP requires.
+
+The SCP binding is stateless in the MCP sense: every request is authenticated on its own, and all
+state a later request needs (objects, paging tokens) is named by explicit identifiers.
+
+#### 11.1.1.1 SCP as an MCP extension
+
+SCP is declared as an MCP extension with the identifier **`io.github.recluzegeek/sharedctx`**.
+The server **MUST** list it in the `extensions` capability of its `server/discover` result, with
+`{"version": "0.2"}`. A client that knows SCP **MAY** declare the same identifier in its
+per-request capabilities. SCP tools remain ordinary MCP tools, so a client that knows nothing of
+SCP can still use them; the extension entry is how SCP-aware clients find and version them.
+
+#### 11.1.1.2 Local agents (stdio)
+
+Some agent hosts can only start MCP servers over stdio (for example, the Agent Client Protocol
+requires stdio support and makes HTTP optional). Implementations **SHOULD** ship a stdio bridge: a
+local MCP server that forwards every request to the remote endpoint unchanged and reads the
+member's credential from its environment, as MCP prescribes for stdio. The bridge **MUST NOT**
+cache, rewrite or log request or result bodies.
 
 #### 11.1.2 Tools
 
@@ -1060,14 +1130,24 @@ Each tool **MUST** declare an `inputSchema` equal to the operation's parameters
 descriptions **SHOULD** tell the model when to call the tool (for example, "Call before editing
 files to announce what you will change"), and **MUST NOT** contain workspace content.
 
+Every tool declares `openWorldHint: false`, except `sharedctx_brief_get`, which declares `true`
+when the server reads external trackers for it. As MCP requires, the tool list **MUST NOT** vary
+per connection; it **MAY** vary by authorization, and servers **SHOULD** omit write tools from a
+`guest`'s list ([§10.3](#103-roles)). Clients treat these annotations as hints, never as
+guarantees, as MCP requires.
+
 #### 11.1.3 Results
 
 A successful call returns `structuredContent` with the operation's result, and a `text` content
 block with the same JSON serialized, for clients without structured output support.
 
 An operation error ([§14](#14-errors)) returns `isError: true` with `structuredContent`
-`{ "error": Error }` and a short `text` block. JSON-RPC errors are reserved for protocol failures
-(unknown tool, malformed request, `UNAUTHENTICATED` during the MCP handshake).
+`{ "error": Error }` and a short `text` block, so the agent can read and correct it, as MCP
+recommends for tool execution errors. JSON-RPC errors are reserved for MCP protocol failures
+(unknown tool, malformed request, unsupported MCP version), using MCP's codes. Authentication
+failures are HTTP `401` with a `WWW-Authenticate` header, per MCP authorization.
+
+Every result's `_meta` carries `{"io.github.recluzegeek/sharedctx": {"version": "0.2"}}`.
 
 #### 11.1.4 Presenting untrusted content
 
@@ -1086,9 +1166,15 @@ The fence marker **MUST** be chosen so it does not occur in the value. Untrusted
 **MUST** carry MCP annotations `{"audience": ["assistant"], "priority": 0.5}` or lower, never
 `audience: ["user"]` alone.
 
+Hosts that build an agent's prompt themselves (for example an Agent Client Protocol client, which
+can set a client system prompt) **MUST NOT** place SCP content in system or developer
+instructions. They pass it as content: an embedded `resource` block carrying the same
+attribution and annotations, which both MCP and ACP define as data.
+
 #### 11.1.5 Resources
 
-Servers **SHOULD** expose:
+Servers **SHOULD** expose the following, with change notifications delivered on MCP's
+`subscriptions/listen` stream (`resourceSubscriptions` filter):
 
 | URI | Content |
 | --- | --- |
@@ -1157,8 +1243,10 @@ authentication, as `application/json`:
 | Field | Type | Req. | Description |
 | --- | --- | --- | --- |
 | `name` | string | yes | Server display name. |
-| `protocol_versions` | string[] | yes | Supported versions, e.g. `["0.1"]`. |
+| `protocol_versions` | string[] | yes | Supported versions, e.g. `["0.2"]`. |
 | `bindings.mcp.url` | string | yes | The MCP endpoint. |
+| `bindings.mcp.extension` | string | yes | `io.github.recluzegeek/sharedctx` ([§11.1.1.1](#11111-scp-as-an-mcp-extension)). |
+| `bindings.mcp.protocol_versions` | string[] | yes | The MCP version identifiers served, as MCP writes them ([§1.5](#15-normative-references)). |
 | `bindings.http.url` | string | no | The HTTP+JSON base URL. |
 | `auth.methods` | enum[] | yes | `oauth2`, `pat`. |
 | `auth.oauth2.authorization_server` | string | no | Per MCP authorization; the protected resource metadata is also served as MCP requires. |
@@ -1204,9 +1292,19 @@ within the server's replay window (at least 1 hour).
 
 ### 13.2 MCP
 
-Servers send `notifications/resources/updated` for `sharedctx://handoffs/inbox` on
-`handoff.received`, and for `sharedctx://brief?...` subscriptions on any change to the brief's
-content. Events are not pushed into the agent's context directly; the client decides when to read.
+MCP notifications carry no payload and reach only clients with an open stream, so they can only
+say "something changed". Servers implementing the Events profile over MCP:
+
+* **SHOULD** offer the event types of this section through the MCP Events extension
+  (`io.modelcontextprotocol/events`) where client and server both support it, named
+  `sharedctx.intent.overlap`, `sharedctx.handoff.received`, `sharedctx.handoff.updated` and
+  `sharedctx.note.expiring`, with the payloads defined above. That extension adds subscription
+  arguments, payloads and resumption that plain notifications lack.
+* **MUST** otherwise send `notifications/resources/updated` on `subscriptions/listen` streams: for
+  `sharedctx://handoffs/inbox` on `handoff.received`, and for subscribed `sharedctx://brief?...`
+  resources on any change to the brief's content. The client then reads the resource.
+
+Events are never pushed into the agent's context directly; the client decides when to read.
 
 ---
 
@@ -1251,10 +1349,11 @@ workspace ([§10.4](#104-workspace-isolation)).
 Protocol versions are `MAJOR.MINOR`. Within a major version, minor versions only add optional
 fields, operations, enum values and profiles.
 
-* HTTP: clients send `SharedCtx-Version: 0.1`. Servers respond with the version used. If the
+* HTTP: clients send `SharedCtx-Version: 0.2`. Servers respond with the version used. If the
   requested version is unsupported, the server responds `UNSUPPORTED_VERSION`.
-* MCP: the server's tools implement one version, published as `sharedctx/version` in the `_meta`
-  of the MCP `initialize` result and of every tool result.
+* MCP: the server's tools implement one SCP version, published in the `server/discover`
+  extension entry ([§11.1.1.1](#11111-scp-as-an-mcp-extension)) and in every result's `_meta`.
+  MCP's own version is negotiated separately, per request, as MCP defines.
 
 Before 1.0, any minor version may break compatibility.
 
@@ -1266,9 +1365,11 @@ Servers **MUST** reject unknown enum values in requests with `INVALID_ARGUMENT`.
 
 ### 15.3 Extensions
 
-An extension is identified by a URI and declared in discovery. Extension data lives under an
-`extensions` object on any object or request, keyed by the extension URI. Field names beginning
-with `x-` are reserved for experiments and **MUST NOT** be relied on across servers.
+An extension is identified as MCP identifies its extensions: `{vendor-prefix}/{extension-name}`,
+the prefix a reverse-DNS name the author controls (e.g. `com.example/scope-index`). Extensions are
+declared in discovery. Extension data lives under an `extensions` object on any object or
+request, keyed by the identifier. Field names beginning with `x-` are reserved for experiments and
+**MUST NOT** be relied on across servers.
 
 A server **MAY** mark an extension `required`; a client that doesn't support it **SHOULD NOT**
 write to that server.
@@ -1395,7 +1496,7 @@ Result (`structuredContent`, abridged):
 POST /v0/workspaces/w_1/intents HTTP/1.1
 Host: ctx.example.com
 Authorization: Bearer sharedctx_pat_…
-SharedCtx-Version: 0.1
+SharedCtx-Version: 0.2
 Content-Type: application/json
 
 {
@@ -1412,7 +1513,7 @@ Content-Type: application/json
 HTTP/1.1 201 Created
 Location: /v0/workspaces/w_1/intents/i_19
 ETag: "1"
-SharedCtx-Version: 0.1
+SharedCtx-Version: 0.2
 Content-Type: application/json
 
 {
@@ -1530,13 +1631,13 @@ change touched the other's repository; the shared contract carried the warning.
 
 ## Appendix A. JSON Schemas
 
-Schemas use JSON Schema 2020-12. The full set is published with the specification as
+Schemas use the JSON Schema version pinned in [§1.5](#15-normative-references). The full set is published with the specification as
 `schemas/*.json`; the core definitions are reproduced here.
 
 ```json
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:sharedctx:schema:0.1:core",
+  "$id": "urn:sharedctx:schema:0.2:core",
   "$defs": {
     "Timestamp": { "type": "string", "format": "date-time" },
     "Id": { "type": "string", "minLength": 1, "maxLength": 128 },
@@ -1675,7 +1776,8 @@ pre-scan with a broader tool.
 
 | Protocol / product | What it does | How SCP relates |
 | --- | --- | --- |
-| [Model Context Protocol](https://modelcontextprotocol.io/) | Connects an agent to tools and data. | SCP's primary binding. A SCP server is an MCP server; any MCP client can use it. |
+| [Model Context Protocol](https://modelcontextprotocol.io/) | Connects one host, acting for one user, to tools and data. Servers are isolated from each other and from the conversation; no team or shared-state model. | SCP's primary binding, as an MCP extension ([§11.1.1.1](#11111-scp-as-an-mcp-extension)). SCP adds what MCP leaves out: many members sharing one store, attribution of every item, and untrusted-content rules for that shared data. |
+| [Agent Client Protocol](https://agentclientprotocol.com/) | Connects an editor or other UI (client) to a coding agent; sessions, prompts, tool calls, permissions. Single user; multi-client sessions and teams not specified. | A different layer: ACP is how a person drives their agent, SCP is what the team's agents share. An ACP client passes the SCP server to its agent in `mcpServers`; the stdio bridge ([§11.1.1.2](#11112-local-agents-stdio)) covers agents that only run stdio MCP servers. ACP content blocks carry SCP content as data ([§11.1.4](#1114-presenting-untrusted-content)). |
 | [A2A](https://a2a-protocol.org/) | Agents delegate tasks to other agents; agents stay opaque and don't share memory. | Complementary. A2A moves **tasks** between agents; SCP shares **context** among a team's members. A handoff is information for a person, not a task for an agent. |
 | Git | Stores and merges code. | SCP sits above it: intents describe changes before they exist in Git; references point at Git changes. |
 | Issue trackers | Plan and track work. | Referenced, never replaced ([§4.9](#49-reference)); a server may read them to build briefs. |

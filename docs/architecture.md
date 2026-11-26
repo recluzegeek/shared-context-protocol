@@ -49,7 +49,7 @@ flowchart TB
 
     subgraph server["SCP server: one process"]
         direction TB
-        EDGE["Bindings<br/>MCP Streamable HTTP · HTTP+JSON · SSE"]
+        EDGE["Bindings<br/>MCP Streamable HTTP, pinned version (spec §1.5):<br/>stateless, server/discover<br/>· HTTP+JSON · SSE"]
         AUTHN["Authentication<br/>token -> member, workspace"]
         GUARD["Content safety<br/>limits, control chars, secret detectors"]
         CORE["Domain<br/>notes · intents · overlap · handoffs · brief"]
@@ -354,7 +354,8 @@ audience, tracker credentials per host, retention periods, rate limits.
 
 ```text
 shared-context-protocol/
-  cmd/sharedctx-server/           main: config, wiring, migrations, server
+  cmd/sharedctx-server/     main: config, wiring, migrations, server
+  cmd/sharedctx-bridge/     stdio MCP bridge to the remote server (spec §11.1.1.2)
   internal/domain/          entities, lifecycles, overlap rule, brief assembly (stdlib only)
   internal/app/             operations (§5): authorization, revisions, audit
   internal/adapters/
