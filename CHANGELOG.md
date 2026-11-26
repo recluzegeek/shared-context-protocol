@@ -2,6 +2,33 @@
 
 Versions follow `MAJOR.MINOR.PATCH`. Before 1.0.0, a minor version may break compatibility.
 
+## 0.4.0
+
+From a reviewer's read of 0.3. Breaking for anyone implementing 0.3:
+
+- **Topic scopes are broad** (§6.2.1, §6.3): every `topic` scope is broad, topic-to-topic matches
+  are capped at `low`, and an intent with only topic scopes gets a `topic_only` warning, so
+  `topic` can't route around the alert-fatigue defense.
+- **Search matching is token-based** (§5.4.3): a defined tokenizer (split at every non-letter,
+  non-digit) and prefix matching per token, so `quote` finds `quote_id` and `pricing.v1.Quote`
+  on every server. Replaces "contains all terms", which no full-text engine implements exactly.
+- **Brief cursors are bound to their filter** (§5.3.1): a `since` used with a different `work` or
+  resource set fails with `cursor_filter_mismatch` instead of returning a delta against a moved
+  filter.
+- **Identity-provider membership stays off the request path** (§10.6): group claims come from the
+  validated token; the server never calls the identity provider per request.
+
+Added:
+
+- **Second residual risk** (§17, §8.3): SCP's safety properties hold only for conforming clients,
+  and the protocol cannot enforce client conformance. Clients may declare the client profiles they
+  implement (self-asserted); owners can see what members' clients declared.
+- **Low `uses` coverage stated** (§6.7): no `breaks` warning means no *declared* dependency;
+  clients should fill `uses` from imports, generated-client manifests and lockfiles.
+- **Probing in-flight work** (§17): `intent.check`/`intent.list` are audited with the scopes
+  queried, and should be rate-limited.
+- Topic scopes only alongside specific scopes (§6.6).
+
 ## 0.3.0
 
 First published version (no longer marked draft; pre-1.0 rules still apply).

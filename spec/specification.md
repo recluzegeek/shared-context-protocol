@@ -2,7 +2,7 @@
 
 | | |
 | --- | --- |
-| **Version** | 0.3.0 ([changes](../CHANGELOG.md)) |
+| **Version** | 0.4.0 ([changes](../CHANGELOG.md)) |
 | **Status** | Published. Pre-1.0: a minor version may still break compatibility ([§15.1](#151-version-negotiation)); 1.0.0 needs two independent implementations passing the conformance suite ([§20](#20-open-issues)). |
 | **Editors** | Muhammad Salman ([recluzegeek](https://github.com/recluzegeek)) |
 | **License** | [Apache License 2.0](../LICENSE) |
@@ -635,6 +635,13 @@ the server can no longer serve (older than its retention of change history, at l
 fails with `FAILED_PRECONDITION`; the client asks for a full brief. Agents **SHOULD** use a full
 brief at session start and deltas afterwards.
 
+A cursor is bound to the filter it was issued for: the principal, `work`, and the set of
+resources after canonicalization and aliases. Servers **MUST** encode that binding in the cursor
+and **MUST** reject a `since` used with a different filter with `FAILED_PRECONDITION`
+(`details.reason: "cursor_filter_mismatch"`), rather than returning a delta against a filter that
+moved. Clients whose working resources change mid-session (an agent moving to a sibling
+repository) request a full brief for the new set.
+
 Any role. A server that cannot reach an external tracker **MUST** still return the brief, omit
 `work_details`, and **SHOULD** say so in an `x-` extension field.
 
@@ -668,10 +675,17 @@ Params:
 
 Returns untrusted-wrapped [Note](#43-note)s.
 
-* **Matching.** Without `query`, every note the filters allow. With `query`, servers **MUST**
-  return every allowed note whose `body` or reference titles contain all whitespace-separated
-  query terms, case-insensitively, and **MAY** also return notes found by richer matching
-  (stemming, semantic similarity).
+* **Matching.** Without `query`, every note the filters allow. With `query`, matching is by
+  tokens, defined so that every server agrees on the minimum:
+  * **Tokenizing.** `body`, reference titles and the query are split into tokens at every
+    character that is not a Unicode letter or digit (spaces, punctuation, `_`, `.`, `-`, `/`,
+    `:`), then lowercased. `quote_id` is the tokens `quote` and `id`; `pricing.v1.Quote` is
+    `pricing`, `v1`, `quote`.
+  * **Must match.** Servers **MUST** return every allowed note in which each query token is a
+    prefix of at least one token of the note (`quot` matches `quote`; `quote` matches
+    `quote_id`).
+  * **May match more.** Servers **MAY** also return notes found by stemming or semantic
+    similarity, so results can be a superset of the minimum, never a subset.
 * **Order.** `newest` is by `provenance.updated_at` descending, then `id`: the same on every
   server. `relevance` is server-defined and not comparable across servers; clients that need
   reproducible results use `newest`.
@@ -746,6 +760,7 @@ Author only. Params: `id`, `expected_revision`, any of `scopes`, `action`, `summ
 | `broad_scope` | `scope` is broad ([§6.2.1](#621-broad-scopes)). |
 | `lease_capped` | The lease asked for was longer than the workspace allows; `detail` gives the lease granted, in minutes. |
 | `no_session` | The intent has no `session`, so it can't be closed with its session and won't overlap the member's other sessions. |
+| `topic_only` | Every scope of the intent is a `topic`; its overlaps are capped at `low` ([§6.2.1](#621-broad-scopes)). |
 | `possible_secret` | A heuristic secret detector in `warn` mode matched; `detail` names the field and detector ([§9.1](#91-secret-detection)). Returned by any write, in a top-level `warnings` list next to the created or updated object. |
 
 New codes may be added in minor versions ([§15.2](#152-forward-compatibility)).
@@ -868,12 +883,16 @@ A scope is **broad** when, after normalization, it is:
 
 * a `path` naming a directory with fewer than two segments (`internal/`, `src/`);
 * a `symbol` containing none of `.`, `::`, `#`, `/` (a whole package or module);
-* an `api` whose method is `*`.
+* an `api` whose method is `*`;
+* any `topic`. A topic says nothing about which code changes, so two intents sharing one may
+  never touch the same line.
 
-Broad scopes are allowed, because some work really does span a directory, but they are reported
-as a `broad_scope` warning on announce, update and check, and a containment match through a
-broad scope is capped ([§6.3](#63-severity)). Without this, coarse scopes make every intent
-overlap every other, members learn to ignore overlaps, and the protocol stops being useful.
+Broad scopes are allowed, because some work really does span a directory or a feature, but they
+are reported as a `broad_scope` warning on announce, update and check, and their matches are
+capped ([§6.3](#63-severity)). An intent whose **only** scopes are topics also gets a
+`topic_only` warning. Without this, coarse scopes make every intent overlap every other, members
+learn to ignore overlaps, and the protocol stops being useful; `topic` must not become the easy
+way around it.
 
 ### 6.3 Severity
 
@@ -893,7 +912,10 @@ Each overlap has a severity computed from the relation, the two actions (a use s
 Then, in order:
 
 1. A containment match in which the **containing** scope is broad is capped at `low`.
-2. When several scope pairs match, the overlap takes the highest severity among them.
+2. A match between two `topic` scopes is capped at `low`, exact or not.
+3. When several scope pairs match, the overlap takes the highest severity among them. A pair of
+   specific scopes therefore still raises an overlap to its full severity when the same two
+   intents also share a topic.
 
 Servers **MUST** implement these rules exactly and **MUST NOT** change severity by any other
 input.
@@ -927,6 +949,8 @@ Overlap warnings are only as good as the scopes behind them. Clients and agents 
   grows;
 * declare the **narrowest** scopes that cover the change, preferring `symbol`, `api` and
   `schema` to `path`, and files to directories;
+* use `topic` only **alongside** specific scopes, to group related work, never as the only scope
+  of an intent that edits code;
 * declare one intent per coherent change, not one per session;
 * list in `uses` the contracts the change relies on but doesn't modify;
 * narrow broad scopes as soon as the plan allows, and treat a `broad_scope` warning as a prompt to
@@ -957,8 +981,17 @@ This works only if everyone names a contract the same way. Teams **SHOULD**:
   team, a dedicated repository for another; an SSH and an HTTPS remote), have an owner map one to
   the other in `resource_aliases` ([§4.7.2](#472-aliases)).
 
-A dependency nobody declares, or a contract named two ways without an alias, is not detected. Detecting undeclared dependencies (for example from
-build graphs or generated clients) is left to extensions ([§20](#20-open-issues)).
+A dependency nobody declares, or a contract named two ways without an alias, is not detected.
+
+**Expect `uses` coverage to be low.** Announcing an intent protects the announcer's own edit;
+declaring a dependency protects only whoever later changes the contract. Fields that pay off for
+someone else are the first to be skipped, so `breaks` and `broken_by` warnings will be sparse
+exactly where they matter most: the widely used contracts everyone relies on and nobody declares.
+Until dependencies can be detected rather than declared ([§20](#20-open-issues)), the same rule
+as §17 applies: no `breaks` warning means no **declared** dependency, not no dependency. To raise
+coverage without relying on goodwill, clients **SHOULD** fill `uses` themselves from what the
+working tree already records: imported schema and RPC packages, generated-client manifests,
+dependency lockfiles that name internal services.
 
 ---
 
@@ -1056,6 +1089,10 @@ or the request names no session. Everything else is wrapped: a note an owner edi
 therefore mix wrapped and unwrapped objects.
 
 ### 8.3 Requirements on clients
+
+These requirements bind conforming clients. The server cannot verify that a client meets them,
+so they protect only the members whose clients do ([§17](#17-security-considerations), residual
+risk 2).
 
 A client that places server content in an agent's context:
 
@@ -1212,8 +1249,13 @@ when it does, **MUST** follow these rules so that every server behaves the same:
 
 1. The workspace is configured, out of band, with a claim name (default `groups`) and a map from
    group values to roles. A principal's role is the highest role any of its groups maps to.
-2. Membership is evaluated on **every** authenticated request. The first request of a person
-   whose groups map to a role creates their member (just-in-time), with `handle` from the
+2. Membership is evaluated on **every** authenticated request, from the group claim **in the
+   validated access token**. The server **MUST NOT** call the identity provider (userinfo,
+   directory, SCIM) on the request path: that would put an outside service on every call, and an
+   unavailable identity provider would stall the team, against principle 4
+   ([§1.2](#12-guiding-principles)). Token validation uses cached signing keys; group changes
+   arrive with the next token, or through SCIM pushes applied out of band. The first request of a
+   person whose groups map to a role creates their member (just-in-time), with `handle` from the
    `preferred_username` claim, made unique.
 3. A person whose groups no longer map to any role is treated as removed
    ([§5.2.5](#525-memberremove)) on their next request, and **MUST** be denied with
@@ -1257,8 +1299,8 @@ SCP's MCP binding is a third-party MCP extension, as MCP's extension rules allow
 domain the authors control (`recluzegeek.github.io`) as the vendor prefix, giving the identifier
 **`io.github.recluzegeek/sharedctx`**. It is not an official `io.modelcontextprotocol` extension.
 The server **MUST** list it in the `extensions` capability of its `server/discover` result, with
-`{"versions": ["0.3"]}`, every SCP version it serves. A client that knows SCP **SHOULD** declare
-the same identifier in its per-request client capabilities with `{"version": "0.3"}`, the SCP
+`{"versions": ["0.4"]}`, every SCP version it serves. A client that knows SCP **SHOULD** declare
+the same identifier in its per-request client capabilities with `{"version": "0.4"}`, the SCP
 version it wants ([§15.1](#151-version-negotiation)). SCP tools remain ordinary MCP tools, so a
 client that knows nothing of SCP can still use them; the extension entry is how SCP-aware clients
 find and version them.
@@ -1345,7 +1387,7 @@ recommends for tool execution errors. JSON-RPC errors are reserved for MCP proto
 (unknown tool, malformed request, unsupported MCP version), using MCP's codes. Authentication
 failures are HTTP `401` with a `WWW-Authenticate` header, per MCP authorization.
 
-Every result's `_meta` carries `{"io.github.recluzegeek/sharedctx": {"version": "0.3"}}`.
+Every result's `_meta` carries `{"io.github.recluzegeek/sharedctx": {"version": "0.4"}}`.
 
 #### 11.1.4 Presenting untrusted content
 
@@ -1442,7 +1484,7 @@ authentication, as `application/json`:
 | Field | Type | Req. | Description |
 | --- | --- | --- | --- |
 | `name` | string | yes | Server display name. |
-| `protocol_versions` | string[] | yes | Supported versions, e.g. `["0.3"]`. |
+| `protocol_versions` | string[] | yes | Supported versions, e.g. `["0.4"]`. |
 | `bindings.mcp.url` | string | yes | The MCP endpoint. |
 | `bindings.mcp.extension` | string | yes | `io.github.recluzegeek/sharedctx` ([§11.1.1.1](#11111-scp-as-an-mcp-extension)). |
 | `bindings.mcp.protocol_versions` | string[] | yes | The MCP version identifiers served, as MCP writes them ([§1.5](#15-normative-references)). |
@@ -1552,7 +1594,7 @@ workspace ([§10.4](#104-workspace-isolation)).
 Protocol versions are `MAJOR.MINOR`. Within a major version, minor versions only add optional
 fields, operations, enum values and profiles.
 
-* HTTP: clients send `SharedCtx-Version: 0.3`. Servers respond with the version used. If the
+* HTTP: clients send `SharedCtx-Version: 0.4`. Servers respond with the version used. If the
   requested version is unsupported, the server responds `UNSUPPORTED_VERSION`.
 * MCP: the server lists the SCP versions it serves in its `server/discover` extension entry
   ([§11.1.1.1](#11111-scp-as-an-mcp-extension)). The client asks for one on every request, in the
@@ -1595,8 +1637,16 @@ write to that server.
 A conforming server implements Core and declares every profile it implements in discovery. An
 operation of an undeclared profile returns `UNSUPPORTED_OPERATION`.
 
-A conforming client implements [§8.3](#83-requirements-on-clients) and [§6.5](#65-what-clients-do-with-overlaps)
-for the features it uses.
+Clients have two profiles of their own, named in their capability declaration
+([§17](#17-security-considerations)):
+
+| Client profile | Requires |
+| --- | --- |
+| `trust` | [§8.3](#83-requirements-on-clients) in full, including attribution through compaction, and [§11.1.4](#1114-presenting-untrusted-content) for hosts that build prompts. |
+| `overlap-presentation` | [§6.5](#65-what-clients-do-with-overlaps): high overlaps shown before editing, empty results worded as "nothing announced". |
+
+A conforming client implements both for the features it uses. Neither can be verified by a
+server; they are claims a team can test with the conformance suite's client tests.
 
 A conformance test suite is planned ([§20](#20-open-issues)).
 
@@ -1604,13 +1654,35 @@ A conformance test suite is planned ([§20](#20-open-issues)).
 
 ## 17. Security considerations
 
-**Residual risk that no rule removes: the absence of an overlap does not mean the absence of a
-conflict.** The server only sees what members announce. Work that is never announced, announced
-late, scoped too coarsely, or that depends on something nobody declared, produces no warning, and
-a member who announced correctly then gets a false all-clear. Partial coverage of a warning system
-can create more confidence than it earns. Clients **MUST** word empty results accordingly
-([§6.5](#65-what-clients-do-with-overlaps)), and teams **SHOULD** keep their usual review and
-testing; SCP narrows the window for collisions, it doesn't close it.
+Two residual risks no rule in this specification removes. Both are stated first because they
+decide how far anyone should rely on SCP.
+
+**1. The absence of an overlap does not mean the absence of a conflict.** The server only sees
+what members announce. Work that is never announced, announced late, scoped too coarsely, or that
+depends on something nobody declared ([§6.7](#67-cross-resource-coordination)), produces no
+warning, and a member who announced correctly then gets a false all-clear. Partial coverage of a
+warning system can create more confidence than it earns. Clients **MUST** word empty results
+accordingly ([§6.5](#65-what-clients-do-with-overlaps)), and teams **SHOULD** keep their usual
+review and testing; SCP narrows the window for collisions, it doesn't close it.
+
+**2. SCP's safety properties hold only for conforming clients, and the protocol cannot enforce
+client conformance.** The server side is fully specified and testable: authorship from
+credentials, wrapping, secret refusal, isolation. But prompt injection happens in the client,
+where the content meets the model, and the rules that defend there ([§8.3](#83-requirements-on-clients),
+[§6.5](#65-what-clients-do-with-overlaps)) are obligations on software the server neither
+controls nor can verify. A client that pastes SCP content into its prompt without attribution
+still works: the agent gets the information, and the protection is silently gone. Mitigations
+are partial:
+
+* clients **SHOULD** declare the client profiles they implement in their SCP capability entry
+  (`{"version": "0.4", "conforms": ["trust", "overlap-presentation"]}`); the claim is
+  self-asserted, like `AgentInfo`, and is recorded, not trusted;
+* servers **SHOULD** let owners see which clients members use and what they declared, so a team
+  can standardize on conforming ones;
+* the conformance suite ([§16](#16-conformance)) **SHOULD** include client tests a team can run
+  against the client it plans to use;
+* consequential actions still need human approval in the client, which is the last line of
+  defense whether or not the client conforms.
 
 | Threat | Mitigation in this specification |
 | --- | --- |
@@ -1618,7 +1690,8 @@ testing; SCP narrows the window for collisions, it doesn't close it.
 | **Secret leakage.** Credentials pasted into notes or handoffs spread to every agent and the server's storage. | Mandatory scanning with a minimum detector set; never storing or echoing matches ([§9.1](#91-secret-detection)); client-side pre-scanning recommended. |
 | **Impersonation.** A client claims to be another member or a trusted agent. | Author always set by the server from the credential ([§8.4](#84-requirements-on-servers)); `AgentInfo` never used for authorization ([§4.12](#412-agentinfo)). |
 | **Memory poisoning.** Wrong or outdated notes mislead agents over time. | Expiry and promotion ([§7.1](#71-note)); author and age on every note; owners can retire any note. |
-| **Overlap spoofing.** A member announces broad intents to scare others off an area. | Overlaps are advisory and attributed; whole-resource scopes are refused and broad containment is capped at `low` ([§6.2.1](#621-broad-scopes)); owners can close any intent; intents expire without heartbeats. |
+| **Overlap spoofing.** A member announces broad intents to scare others off an area. | Overlaps are advisory and attributed; whole-resource scopes are refused, and broad and topic matches are capped at `low` ([§6.2.1](#621-broad-scopes)); owners can close any intent; intents expire without leases or heartbeats. |
+| **Probing in-flight work.** `intent.check` and `intent.list` let any member, guests included, map what the team is changing, scope by scope, without announcing anything. | Intended: visibility of in-flight work is the point, and the workspace is the trust boundary. Servers **MUST** audit `intent.check` and `intent.list` calls with the scopes queried ([§10.5](#105-audit)) and **SHOULD** rate-limit them per member; owners decide who is a guest. A team that doesn't want guests to see in-flight work keeps them out of the workspace. |
 | **Alert fatigue.** Honest but coarse scopes make every intent overlap every other, and members stop reading warnings. | `broad_scope` warnings, the broad-containment cap ([§6.3](#63-severity)), and scope guidance ([§6.6](#66-declaring-scopes)). Servers **SHOULD** let owners see each member's share of broad scopes. |
 | **Promotion used to silence expiry.** Notes marked promoted to stop the reminder, with no durable record behind them. | Promotion only to `doc` or `change` references, verified where the server can ([§5.4.6](#546-notepromote)); `promotion_verified` visible to everyone; a renewal cap. |
 | **Stale events.** An overlap shown after one side already finished. | No emission for closed intents; clients confirm before showing ([§13](#13-events)). |
@@ -1704,7 +1777,7 @@ Result (`structuredContent`, abridged):
 POST /v0/workspaces/w_1/intents HTTP/1.1
 Host: ctx.example.com
 Authorization: Bearer sharedctx_pat_…
-SharedCtx-Version: 0.3
+SharedCtx-Version: 0.4
 Content-Type: application/json
 
 {
@@ -1724,7 +1797,7 @@ Content-Type: application/json
 HTTP/1.1 201 Created
 Location: /v0/workspaces/w_1/intents/i_19
 ETag: "1"
-SharedCtx-Version: 0.3
+SharedCtx-Version: 0.4
 Content-Type: application/json
 
 {
@@ -1860,7 +1933,7 @@ and published in discovery ([§3.4](#34-limits)).
 ```json
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:sharedctx:schema:0.3:core",
+  "$id": "urn:sharedctx:schema:0.4:core",
   "$defs": {
     "Timestamp": { "type": "string", "format": "date-time" },
     "Id": { "type": "string", "minLength": 1, "maxLength": 128 },
@@ -1942,7 +2015,7 @@ and published in discovery ([§3.4](#34-limits)).
     "Warning": {
       "type": "object", "required": ["code"],
       "properties": {
-        "code": { "type": "string", "description": "broad_scope | lease_capped | no_session | possible_secret; new codes may appear in minor versions" },
+        "code": { "type": "string", "description": "broad_scope | topic_only | lease_capped | no_session | possible_secret; new codes may appear in minor versions" },
         "scope": { "$ref": "#/$defs/Scope" },
         "detail": { "type": "string" }
       }

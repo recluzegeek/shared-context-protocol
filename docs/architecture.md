@@ -77,7 +77,7 @@ flowchart TB
 | Language | Go, single static binary | Easy to self-host; mature MCP SDK |
 | Structure | Hexagonal: `domain/` depends on nothing; bindings, storage, trackers are adapters | The overlap rule and lifecycles are pure functions, testable without I/O |
 | Storage | PostgreSQL; SQLite for single-team installs | Full-text search built in; one dependency |
-| Search | Postgres `tsvector` with `websearch_to_tsquery` | Meets §5.4.3 without a vector store |
+| Search | Tokens computed in Go by the spec's tokenizer (§5.4.3), stored space-joined and indexed as `to_tsvector('simple', …)`; queries as `to_tsquery('simple', 'tok:*' & …)` | Meets §5.4.3 exactly without a vector store. Postgres's default parser would read `pricing.v1.Quote` as one host-like token and miss `quote`; tokenizing in Go first makes the database agree with the spec |
 | Background work | One sweeper loop, one minute tick, `SELECT … FOR UPDATE SKIP LOCKED` | Lifecycle deadlines in §7 without a queue |
 | Events | In-process fan-out; Postgres `LISTEN/NOTIFY` across replicas | No broker to run |
 | Auth | Personal access tokens (HMAC-SHA-256 at rest) and OAuth 2.1 via an external IdP | §10.2 |
@@ -386,7 +386,8 @@ shared-context-protocol/
 | Layer | What |
 | --- | --- |
 | Domain | Table tests for every §6.2 matching rule, rename `to` matching, every §6.1 relation, every §6.3 severity cell and the broad cap; lifecycle transitions in §7, including illegal ones; the renewal cap |
-| Membership | Identity-provider group changes (§10.6): join, role change, removal denied on the next request, open intents closed |
+| Membership | Identity-provider group changes (§10.6): join, role change, removal denied on the next request, open intents closed; no identity-provider call on the request path (claims from the token, keys cached) |
+| Search | The tokenizer against §5.4.3's examples (`quote_id`, `pricing.v1.Quote`, prefixes), and that the database returns exactly the notes the Go matcher accepts |
 | Content safety | Each Appendix B detector, plus placeholders that must pass |
 | Bindings | The same operation through MCP and HTTP returns the same result and errors |
 | Isolation | Every operation with another workspace's ids returns `NOT_FOUND` |
