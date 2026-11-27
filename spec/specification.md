@@ -2,7 +2,7 @@
 
 | | |
 | --- | --- |
-| **Version** | 0.4.2 ([changes](../CHANGELOG.md)) |
+| **Version** | 0.4.3 ([changes](../CHANGELOG.md)) |
 | **Status** | Published. Pre-1.0: a minor version may still break compatibility ([§15.1](#151-version-negotiation)); 1.0.0 needs two independent implementations passing the conformance suite ([§20](#20-open-issues)). |
 | **Editors** | Muhammad Salman ([recluzegeek](https://github.com/recluzegeek)) |
 | **License** | [Apache License 2.0](../LICENSE) |
@@ -392,7 +392,7 @@ A read-only bundle assembled at request time. Servers **MUST NOT** persist brief
 | `promoted` | [Untrusted](#82-untrusted-text-envelope)<[Note](#43-note)>[] | yes | Notes matching the work or resources that were promoted within the last `note_ttl_days`: pointers to where the knowledge now lives. At most 20. |
 | `promoted_next_page_token` | string | no | Present when `promoted` was cut; continue with `note.search` ([§5.3.1](#531-briefget)). |
 | `intents` | [Untrusted](#82-untrusted-text-envelope)<[Intent](#44-intent)>[] | yes | Other members' active intents on the resources. |
-| `intents_next_page_token` | string | no | Present when `intents` was cut; continue with `intent.list` ([§5.5.6](#556-intentlist)). |
+| `intents_next_page_token` | string | no | Present when `intents` was cut: an `intent.list` page token ([§5.5.6](#556-intentlist)) for the brief's filter, positioned right after the last intent the brief reached. `intent.list` also returns the principal's own intents, which the client may skip. |
 | `my_intents` | [Intent](#44-intent)[] | yes | The principal's own active intents on the resources. |
 | `handoffs` | [Untrusted](#82-untrusted-text-envelope)<[Handoff](#45-handoff)>[] | yes | Open or acknowledged handoffs to the principal for the work or resources. |
 | `handoffs_next_page_token` | string | no | Present when `handoffs` was cut; continue with `handoff.inbox` ([§5.6.2](#562-handoffinbox)). |
@@ -644,7 +644,8 @@ When neither `work` nor `resources` is given, the server uses
 * `handoffs`: `open` or `acknowledged` handoffs to the principal whose `work` equals `work` or
   whose `refs` mention a resource in `resources`.
 * `expiring_notes`: the principal's own `active` notes expiring within `note_warn_days`,
-  regardless of filter.
+  regardless of filter, and regardless of `since`: it is a standing reminder, always the current
+  set, in full and delta briefs alike.
 
 **Deltas.** With `since`, every list holds only objects whose `revision` changed after that
 cursor, in their current state, including ones that left the brief's filter (a note now
@@ -779,7 +780,7 @@ Author only. Params: `id`, `expected_revision`, any of `scopes`, `action`, `summ
 | `lease_capped` | The lease asked for was longer than the workspace allows; `detail` gives the lease granted, in minutes. |
 | `no_session` | The intent has no `session`, so it can't be closed with its session and won't overlap the member's other sessions. |
 | `topic_only` | Every scope of the intent is a `topic`; its overlaps are capped at `low` ([§6.2.1](#621-broad-scopes)). |
-| `lease_expiring` | One of the principal's active intents expires within 15 minutes or a tenth of its lease, whichever is longer; `detail` gives the intent id and `expires_at`. Added to the result of **any** call by the principal, so an agent learns about it from whatever it does next, without watching a clock ([§4.4.1](#441-sessions-and-leases)). |
+| `lease_expiring` | One of the principal's active intents expires within a fifth of its lease, at most 15 minutes (15 minutes for an intent without a lease); `detail` gives the intent id and `expires_at`. Added to the result of **any** call by the principal, so an agent learns about it from whatever it does next, without watching a clock ([§4.4.1](#441-sessions-and-leases)). |
 | `possible_secret` | A heuristic secret detector in `warn` mode matched; `detail` names the field and detector ([§9.1](#91-secret-detection)). Returned by any write, in a top-level `warnings` list next to the created or updated object. |
 
 New codes may be added in minor and patch versions ([§15.1](#151-version-negotiation)); clients
@@ -802,6 +803,12 @@ the brief's filter ([§5.3.1](#531-briefget)), so a cut brief list can be contin
 
 Params: `resource`, `scopes`, `action`, `uses?`, `session?`. Returns the overlaps and warnings
 that **would** result, without creating an intent. For agents deciding whether to start.
+
+The same-work rule of [§6.1](#61-when-it-runs) applies to the probe only through `session`: with
+a `session`, the principal's intents of that session are skipped, as an announce from that
+session would skip them; **without** one, the probe counts as a new session, so it reports the
+principal's own intents too, including those that have no session. A member asking "may I
+start?" sees their own earlier work rather than having it hidden.
 
 #### 5.5.8 `intent.close_session`
 
@@ -1154,7 +1161,8 @@ A client that places server content in an agent's context:
 
 ### 9.1 Secret detection
 
-Before storing any client-supplied string, a server **MUST** scan it for credentials and
+Before storing any client-supplied string (free text, but also identifiers, references and
+URIs, where credentials often hide, as in `https://user:pass@host`), a server **MUST** scan it for credentials and
 **MUST** reject the write with `SECRET_DETECTED` when one is found. The server:
 
 * **MUST** implement at least the detectors in [Appendix B](#appendix-b-minimum-secret-detectors),
@@ -1390,16 +1398,24 @@ credential is granted one of them:
 
 | Set | Tools | For |
 | --- | --- | --- |
-| `essentials` | The nine marked essentials above | Day-to-day agent sessions. The default for new credentials. |
+| `essentials` | The tools marked essentials above | Day-to-day agent sessions. The default for new credentials. |
 | `full` | Essentials and every tool marked full | Members who curate notes, run long sessions or post handoffs. |
 | `admin` | Full and the admin tools | Owners managing the workspace. |
+
+A set holds only the tools of profiles the server implements ([§16](#16-conformance)): a tool
+whose profile isn't declared in discovery is never listed, in any set. So `essentials` is nine
+tools on a server with Core, Coordination and Handoff, eight without Handoff, four with Core
+alone; and `admin` equals `full` on a server without Administration. A set's exact list is
+therefore derived from the server's declared profiles, the credential's set and the member's
+role, and a client or a conformance suite can compute it.
 
 The set travels with the credential: an OAuth scope (`sharedctx:essentials`, `sharedctx:full`,
 `sharedctx:admin`) or a property of a personal access token. As MCP requires, the tool list
 **MUST NOT** vary per connection; it varies only by this authorization. A set never grants more
 than the member's role allows ([§10.3](#103-roles)): a `guest` gets the read-only tools of the
 set, and only an `owner` can hold `admin`. A tool outside the credential's set is not listed, and
-calling it fails with `PERMISSION_DENIED`. Everything a set leaves out stays reachable through
+calling it fails: over MCP as an unknown tool (the protocol error MCP defines, since the tool
+isn't in the list), over HTTP+JSON with `PERMISSION_DENIED`. Everything a set leaves out stays reachable through
 the HTTP+JSON binding and the brief.
 
 A session that needs a tool outside its set mid-way (posting a handoff from `essentials`)
@@ -1668,9 +1684,10 @@ write to that server.
 
 | Profile | Requires |
 | --- | --- |
-| **Core** (required) | Workspace, members, notes (all operations), `brief.get` (notes and expiring notes), [§7.1](#71-note), [§8](#8-trust-model-and-untrusted-content), [§9](#9-content-safety), [§10](#10-authentication-and-authorization), MCP binding, discovery, errors. |
+| **Core** (required) | `workspace.get`, `member.me`, `member.list`, `session.start`, notes (all operations), `brief.get` (notes and expiring notes), [§7.1](#71-note), [§8](#8-trust-model-and-untrusted-content), [§9](#9-content-safety), [§10](#10-authentication-and-authorization) except [§10.6](#106-membership-from-an-identity-provider), MCP binding, discovery, errors. |
 | **Coordination** | All intent operations, [§6](#6-overlap-detection), [§7.2](#72-intent), intents in briefs. |
 | **Handoff** | All handoff operations, [§7.3](#73-handoff), handoffs in briefs. |
+| **Administration** | `workspace.update`, `member.invite`, `member.update`, `member.remove`; and/or [§10.6](#106-membership-from-an-identity-provider). Servers without it manage workspaces and members out of band. |
 | **Events** | [§13](#13-events) for every other profile the server implements. |
 | **HTTP** | The HTTP+JSON binding for every profile the server implements. |
 
@@ -2112,11 +2129,12 @@ inputs.
 | `jwt` | `\beyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b` |
 | `url_credentials` | A URL with a non-empty password: `[a-z][a-z0-9+.-]*://[^/\s:@]+:[^/\s@]+@` |
 | `assigned_secret` | `(password\|passwd\|secret\|token\|api[_-]?key\|client[_-]?secret)\s*[:=]\s*["']?[^\s"']{8,}` (case-insensitive), excluding obvious placeholders such as `<…>`, `${…}`, `****`, `changeme`, `example` |
-| `high_entropy` | A run of 32+ base64 or hex characters with Shannon entropy above 4.0 bits per character for base64 or 3.0 for hex, adjacent to one of the keywords in `assigned_secret` |
+| `high_entropy` | A run of 32+ base64 or hex characters with Shannon entropy above 4.0 bits per character for base64 or 3.0 for hex, within 40 characters **after** one of the keywords in `assigned_secret`, on the same line |
 
 The keyword requirement on `high_entropy` is a deliberate trade-off: without it, hashes, commit
 ids and identifiers that notes legitimately carry would be refused. A bare key of an unknown
-format with no keyword nearby is therefore **not** caught by this minimum set. Servers **SHOULD**
+format with no keyword nearby, or with the keyword only after it, is therefore **not** caught by
+this minimum set; the conformance vectors pin both cases. Servers **SHOULD**
 add provider-specific detectors for the credentials their teams use, and clients **SHOULD**
 pre-scan with a broader tool.
 

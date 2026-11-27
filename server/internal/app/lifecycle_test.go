@@ -45,11 +45,15 @@ func TestLeaseLifecycle(t *testing.T) {
 	}
 
 	now = now.Add(20 * time.Minute)
+	if w := svc.LeaseWarnings(ctx, p); len(w) != 0 {
+		t.Fatalf("10 minutes left of a 30-minute lease is outside its 6-minute window: %v", w)
+	}
+	now = now.Add(5 * time.Minute)
 	if w := svc.LeaseWarnings(ctx, p); len(w) != 1 || w[0].Code != "lease_expiring" {
-		t.Fatalf("10 minutes before expiry: %v", w)
+		t.Fatalf("5 minutes before expiry: %v", w)
 	}
 
-	now = now.Add(15 * time.Minute)
+	now = now.Add(10 * time.Minute)
 	if err := svc.Sweep(ctx); err != nil {
 		t.Fatal(err)
 	}

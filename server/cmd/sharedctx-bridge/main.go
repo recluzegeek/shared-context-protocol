@@ -37,7 +37,7 @@ func run() error {
 		return fmt.Errorf("SHAREDCTX_URL and SHAREDCTX_TOKEN must be set")
 	}
 	ctx := context.Background()
-	client := mcp.NewClient(&mcp.Implementation{Name: "sharedctx-bridge", Version: "0.1.0"}, nil)
+	client := mcp.NewClient(&mcp.Implementation{Name: "sharedctx-bridge", Version: "0.2.0"}, nil)
 	remote, err := client.Connect(ctx, &mcp.StreamableClientTransport{
 		Endpoint: url, HTTPClient: &http.Client{Transport: bearer{token, http.DefaultTransport}},
 	}, nil)
@@ -46,7 +46,7 @@ func run() error {
 	}
 	defer func() { _ = remote.Close() }()
 
-	local := mcp.NewServer(&mcp.Implementation{Name: "sharedctx-bridge", Version: "0.1.0"}, nil)
+	local := mcp.NewServer(&mcp.Implementation{Name: "sharedctx-bridge", Version: "0.2.0"}, nil)
 	for t, err := range remote.Tools(ctx, nil) {
 		if err != nil {
 			return fmt.Errorf("list tools: %w", err)

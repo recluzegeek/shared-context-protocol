@@ -35,10 +35,10 @@ var Detectors = []Detector{
 	{Name: "aws_access_key_id", Kind: DetectorFormat, Pattern: regexp.MustCompile(`\b(?:AKIA|ASIA)[0-9A-Z]{16}\b`)},
 	{Name: "aws_secret_access_key", Kind: DetectorFormat, Pattern: regexp.MustCompile(`(?i)(?:aws_secret_access_key|secretAccessKey)\s*[:=]\s*["']?[A-Za-z0-9/+=]{40}`)},
 	{Name: "github_token", Kind: DetectorFormat, Pattern: regexp.MustCompile(`\bgh[pousr]_[A-Za-z0-9]{36,255}\b|\bgithub_pat_[A-Za-z0-9_]{82}\b`)},
-	{Name: "gitlab_token", Kind: DetectorFormat, Pattern: regexp.MustCompile(`\bglpat-[A-Za-z0-9_-]{20,}`)},
-	{Name: "slack_token", Kind: DetectorFormat, Pattern: regexp.MustCompile(`\bxox[abprs]-[A-Za-z0-9-]{10,}`)},
+	{Name: "gitlab_token", Kind: DetectorFormat, Pattern: regexp.MustCompile(`\bglpat-[A-Za-z0-9_-]{20,}\b`)},
+	{Name: "slack_token", Kind: DetectorFormat, Pattern: regexp.MustCompile(`\bxox[abprs]-[A-Za-z0-9-]{10,}\b`)},
 	{Name: "stripe_key", Kind: DetectorFormat, Pattern: regexp.MustCompile(`\b(?:sk|rk)_(?:live|test)_[A-Za-z0-9]{16,}\b`)},
-	{Name: "google_api_key", Kind: DetectorFormat, Pattern: regexp.MustCompile(`\bAIza[0-9A-Za-z_-]{35}`)},
+	{Name: "google_api_key", Kind: DetectorFormat, Pattern: regexp.MustCompile(`\bAIza[0-9A-Za-z_-]{35}\b`)},
 	{Name: "jwt", Kind: DetectorFormat, Pattern: regexp.MustCompile(`\beyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}`)},
 	{Name: "url_credentials", Kind: DetectorFormat, Pattern: regexp.MustCompile(`[a-zA-Z][a-zA-Z0-9+.-]*://[^/\s:@]+:[^/\s@]+@`)},
 	{

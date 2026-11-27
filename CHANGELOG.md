@@ -2,6 +2,28 @@
 
 Versions follow `MAJOR.MINOR.PATCH`. Before 1.0.0, a minor version may break compatibility.
 
+## 0.4.3
+
+Clarifications found by reviewing the reference server against the spec; nothing in 0.4.2 breaks.
+
+- **Tool sets follow declared profiles** (§11.1.2.1): a tool whose profile the server doesn't
+  implement is never listed, so `essentials` is nine tools with Handoff, eight without, four with
+  Core alone. The list is computable from discovery, the set and the role.
+- **Administration profile** (§16): `workspace.update` and member administration (or identity
+  provider membership) are their own profile; Core names exactly which reads it needs, including
+  `session.start`.
+- **`expiring_notes` ignores `since`** (§5.3.1): a standing reminder, always the current set.
+- **`intent.check` without a session** (§5.5.7) counts as a new session, so it shows the
+  principal's own earlier intents instead of hiding them.
+- **Brief intents continuation** (§4.6): the token is an `intent.list` page token positioned after
+  the last intent the brief reached.
+- **`lease_expiring` window** (§5.5.4): a fifth of the lease, at most 15 minutes. 0.4.2's "15 minutes
+  or a tenth, whichever is longer" warned on every call for leases of 15 minutes or less.
+- **Calling an unlisted tool over MCP** fails as an unknown tool, the only error MCP has for it;
+  `PERMISSION_DENIED` stays for HTTP+JSON (§11.1.2.1).
+- **Secret scanning covers identifiers and URIs** (§9.1), and `high_entropy` is pinned to a keyword
+  *before* the value (Appendix B); vectors cover both.
+
 ## 0.4.2
 
 Correction found by building the reference server.

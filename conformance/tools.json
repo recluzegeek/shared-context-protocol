@@ -1,0 +1,33 @@
+{
+  "description": "The MCP tools of spec §11.1.2 with their profile and set. A credential's tool list is every tool whose profile the server declares in discovery and whose set is within the credential's set (essentials ⊂ full ⊂ admin); a guest gets only the read-only ones (§11.1.2.1, §10.3).",
+  "tools": [
+    { "name": "sharedctx_brief_get",            "profile": "core",           "set": "essentials", "read_only": true },
+    { "name": "sharedctx_session_start",        "profile": "core",           "set": "essentials", "read_only": false },
+    { "name": "sharedctx_note_write",           "profile": "core",           "set": "essentials", "read_only": false },
+    { "name": "sharedctx_note_search",          "profile": "core",           "set": "essentials", "read_only": true },
+    { "name": "sharedctx_intent_check",         "profile": "coordination",   "set": "essentials", "read_only": true },
+    { "name": "sharedctx_intent_announce",      "profile": "coordination",   "set": "essentials", "read_only": false },
+    { "name": "sharedctx_intent_close",         "profile": "coordination",   "set": "essentials", "read_only": false },
+    { "name": "sharedctx_intent_close_session", "profile": "coordination",   "set": "essentials", "read_only": false },
+    { "name": "sharedctx_handoff_inbox",        "profile": "handoff",        "set": "essentials", "read_only": true },
+    { "name": "sharedctx_intent_heartbeat",     "profile": "coordination",   "set": "full",       "read_only": false },
+    { "name": "sharedctx_intent_update",        "profile": "coordination",   "set": "full",       "read_only": false },
+    { "name": "sharedctx_intent_list",          "profile": "coordination",   "set": "full",       "read_only": true },
+    { "name": "sharedctx_note_get",             "profile": "core",           "set": "full",       "read_only": true },
+    { "name": "sharedctx_note_update",          "profile": "core",           "set": "full",       "read_only": false },
+    { "name": "sharedctx_note_renew",           "profile": "core",           "set": "full",       "read_only": false },
+    { "name": "sharedctx_note_promote",         "profile": "core",           "set": "full",       "read_only": false },
+    { "name": "sharedctx_note_retire",          "profile": "core",           "set": "full",       "read_only": false },
+    { "name": "sharedctx_handoff_post",         "profile": "handoff",        "set": "full",       "read_only": false },
+    { "name": "sharedctx_handoff_outbox",       "profile": "handoff",        "set": "full",       "read_only": true },
+    { "name": "sharedctx_handoff_respond",      "profile": "handoff",        "set": "full",       "read_only": false },
+    { "name": "sharedctx_handoff_withdraw",     "profile": "handoff",        "set": "full",       "read_only": false },
+    { "name": "sharedctx_workspace_get",        "profile": "core",           "set": "full",       "read_only": true },
+    { "name": "sharedctx_member_me",            "profile": "core",           "set": "full",       "read_only": true },
+    { "name": "sharedctx_member_list",          "profile": "core",           "set": "full",       "read_only": true },
+    { "name": "sharedctx_workspace_update",     "profile": "administration", "set": "admin",      "read_only": false },
+    { "name": "sharedctx_member_invite",        "profile": "administration", "set": "admin",      "read_only": false },
+    { "name": "sharedctx_member_update",        "profile": "administration", "set": "admin",      "read_only": false },
+    { "name": "sharedctx_member_remove",        "profile": "administration", "set": "admin",      "read_only": false }
+  ]
+}

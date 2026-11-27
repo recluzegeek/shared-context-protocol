@@ -82,7 +82,7 @@ func tools(svc *app.Service) []tool {
 			summarizeIntent),
 		define(app.SetEssentials, "sharedctx_intent_close",
 			"Close one of your intents when the change landed (completed) or was dropped (abandoned).",
-			idem(), func(ctx context.Context, p app.Principal, in closeParams) (any, error) {
+			rw(), func(ctx context.Context, p app.Principal, in closeParams) (any, error) {
 				closed, err := svc.IntentClose(ctx, p, in.ID, "", in.Outcome)
 				return map[string]any{"intents": closed}, err
 			}, summarizeClosed),

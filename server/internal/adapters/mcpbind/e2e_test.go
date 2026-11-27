@@ -202,14 +202,19 @@ func TestNotesSecretsAndSearch(t *testing.T) {
 func TestToolSetsAndRoles(t *testing.T) {
 	url, aliceTok, bobTok, guestTok := setup(t)
 	if n := len(connect(t, url, aliceTok).tools()); n != 8 {
-		t.Errorf("essentials lists %d tools, want 8 (handoff.inbox waits for the Handoff profile)", n)
+		t.Errorf("essentials lists %d tools, want 8: Core and Coordination without Handoff (spec §11.1.2.1)", n)
 	}
 	if n := len(connect(t, url, bobTok).tools()); n <= 8 {
 		t.Errorf("full lists %d tools", n)
 	}
-	out, isErr := connect(t, url, guestTok).call("sharedctx_note_write", map[string]any{"kind": "gotcha", "body": "x"})
-	if !isErr || out["error"].(map[string]any)["code"] != "PERMISSION_DENIED" {
-		t.Errorf("guest write = %v", out)
+	guest := connect(t, url, guestTok)
+	if got := guest.tools(); len(got) != 3 {
+		t.Errorf("a guest's essentials are the read-only ones (brief, check, search): %v", got)
+	}
+	if _, err := guest.cs.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "sharedctx_note_write", Arguments: map[string]any{"kind": "gotcha", "body": "x"},
+	}); err == nil {
+		t.Error("a guest calling an unlisted write tool must fail")
 	}
 	resp, err := http.Post(url, "application/json", strings.NewReader(`{}`))
 	if err != nil {

@@ -42,8 +42,9 @@ it and `server/` disagree, the spec and the vectors decide, not the reference se
 
 ## Status
 
-**Spec 0.4.2, published** ([changelog](CHANGELOG.md)); until 1.0, a minor version may still
-break compatibility. **Reference server 0.1.0**: Core and Coordination over MCP, see
+**Spec 0.4.3, published** ([changelog](CHANGELOG.md)); until 1.0, a minor version may still
+break compatibility. **Reference server 0.2.0**: Core and Coordination over MCP, passing the
+domain vectors and the wire suite, see
 [server/README.md](server/README.md). Feedback on the open issues in
 [§20 of the specification](spec/specification.md#20-open-issues) is the most useful contribution
 right now.

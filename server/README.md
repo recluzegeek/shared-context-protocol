@@ -4,7 +4,8 @@ A reference implementation of the [Shared Context Protocol](../spec/specificatio
 implementation, not the implementation. Where it and the [conformance vectors](../conformance)
 disagree, the vectors are right.
 
-**Version 0.1.0**, implementing spec 0.4. One static binary, SQLite storage, MCP over stateless
+**Version 0.2.0**, implementing spec 0.4 (0.4.3) and passing the
+[wire conformance suite](../conformance/wire). One static binary, SQLite storage, MCP over stateless
 Streamable HTTP.
 
 ## What it implements
@@ -23,6 +24,16 @@ Streamable HTTP.
 | Tracker integrations (work details, verified promotion) | Not yet: promotions are recorded with `promotion_verified: false` |
 | Retention and deletion of expired data | Not yet: data is kept |
 | Requested SCP version in client capabilities | Not checked yet: every request gets 0.4 |
+
+Known limits, by design for now:
+
+* **One SQLite connection** serializes every transaction, including the sweeper, which scans for
+  due notes and intents every 30 seconds. A large backlog of due objects, or many concurrent
+  agents, makes live calls wait behind it; that is the point to move to Postgres, not a row count.
+* **Every string a client sends is secret-scanned**, identifiers and URIs included, as the spec
+  requires; a URI with credentials in it is refused like a note would be.
+* **Filtering is in memory** over a workspace's notes and intents (fine for a team, not for
+  hundreds of thousands of objects).
 
 ## Run it
 

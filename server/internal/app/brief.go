@@ -150,26 +150,33 @@ func (s *Service) assemble(tx Tx, p Principal, ws Workspace, in BriefParams, wor
 	if err != nil {
 		return b, err
 	}
-	slices.SortFunc(intents, func(a, c Intent) int { return c.Provenance.CreatedAt.Compare(a.Provenance.CreatedAt) })
-	others := 0
+	sortIntents(intents)
+	var listed []Intent // exactly intent.list's result for this filter, in its order
 	for _, i := range intents {
-		if !intentMatches(i, work, res) {
+		if intentMatches(i, work, res) {
+			listed = append(listed, i)
+		}
+	}
+	others := 0
+	for pos, i := range listed {
+		mine := i.Provenance.Author.ID == p.Member.ID && (in.Session == "" || in.Session == i.Session)
+		if mine {
+			b.MyIntents = append(b.MyIntents, i)
 			continue
 		}
-		mine := i.Provenance.Author.ID == p.Member.ID && (in.Session == "" || in.Session == i.Session)
-		switch {
-		case mine:
-			b.MyIntents = append(b.MyIntents, i)
-		case others < Limits["page_size_max"]:
-			b.Intents = append(b.Intents, wrapIntent(p, i, in.Session))
-			others++
-		default:
-			if b.IntentsNextPageToken == "" {
-				// ponytail: continues intent.list from its first page; the client may see repeats.
-				b.IntentsNextPageToken = encodePage(0, filterHash("intent.list", work, uris(res), []string{"active"}, "", ""))
+		if others == Limits["page_size_max"] {
+			// An intent.list page token positioned at the first intent left out (spec §4.6), full
+			// briefs only since intent.list has no delta. Keep going for the principal's own.
+			if !slices.Contains(b.Truncated, "intents") {
+				if !b.Delta {
+					b.IntentsNextPageToken = encodePage(pos, filterHash("intent.list", work, uris(res), []string{"active"}, "", ""))
+				}
 				b.Truncated = append(b.Truncated, "intents")
 			}
+			continue
 		}
+		b.Intents = append(b.Intents, wrapIntent(p, i, in.Session))
+		others++
 	}
 	all, err := tx.Notes(ws.ID, []string{"active"}, 0)
 	if err != nil {

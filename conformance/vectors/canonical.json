@@ -13,6 +13,8 @@
     { "input": "git://git.example.com/Team/API", "want": "git:git.example.com/Team/API" },
     { "input": "git:git.example.com:2222/Team/API", "want": "git:git.example.com:2222/Team/API" },
     { "input": "https://user:secret@github.com/Acme/Shop.git", "want": "git:github.com/acme/shop" },
+    { "input": "https://github.com/acme/shop.git.git", "want": "git:github.com/acme/shop.git" },
+    { "input": "/Team/API/.git/", "want": null },
     { "input": "urn:example:service:billing", "want": "urn:example:service:billing" },
     { "input": "not a uri", "want": null },
     { "input": "https://github.com/", "want": null }

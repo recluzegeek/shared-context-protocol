@@ -170,6 +170,9 @@ func (s *Service) overlapsFor(tx Tx, p Principal, ws Workspace, subject Intent) 
 
 // reason is built only from server-controlled parts: handle, action, kinds (spec §6.4, §8.4).
 func reason(other Intent, o domain.Overlap) string {
+	if len(o.Matches) == 0 {
+		return other.Provenance.Author.Handle + " has an overlapping intent"
+	}
 	m := o.Matches[0]
 	for _, x := range o.Matches {
 		if x.Match == domain.Exact {
@@ -249,9 +252,15 @@ func (s *Service) IntentCheck(ctx context.Context, p Principal, in IntentParams)
 		if err != nil {
 			return err
 		}
+		// Without a session the probe is a new session, so it shows the principal's own intents
+		// instead of hiding them as the same work (spec §5.5.7).
+		session := in.Session
+		if session == "" {
+			session = "\x00check"
+		}
 		probe := Intent{
 			ID: "", Resource: in.Resource, Scopes: in.Scopes, Action: in.Action, Uses: in.Uses,
-			Session: in.Session, Provenance: Provenance{Author: p.Member.Ref()},
+			Session: session, Provenance: Provenance{Author: p.Member.Ref()},
 		}
 		overlaps, err := s.overlapsFor(tx, p, ws, probe)
 		if err != nil {
@@ -540,8 +549,19 @@ func (s *Service) listIntents(tx Tx, ws Workspace, in IntentListParams) ([]Inten
 		}
 		out = append(out, i)
 	}
-	slices.SortFunc(out, func(a, b Intent) int { return b.Provenance.CreatedAt.Compare(a.Provenance.CreatedAt) })
+	sortIntents(out)
 	return out, filterHash("intent.list", work, uris(res), status, in.Author, in.Session), nil
+}
+
+// sortIntents is intent.list's order, newest first then id; the brief uses it too, so a brief's
+// continuation offset points into the same list.
+func sortIntents(is []Intent) {
+	slices.SortFunc(is, func(a, b Intent) int {
+		if c := b.Provenance.CreatedAt.Compare(a.Provenance.CreatedAt); c != 0 {
+			return c
+		}
+		return strings.Compare(a.ID, b.ID)
+	})
 }
 
 // intentMatches is the brief's intent filter: change or uses resource, or the same work.
@@ -578,9 +598,9 @@ func (s *Service) LeaseWarnings(ctx context.Context, p Principal) []Warning {
 			if i.Provenance.Author.ID != p.Member.ID {
 				continue
 			}
-			window := 15 * time.Minute
-			if lease := time.Duration(i.LeaseMinutes) * time.Minute / 10; lease > window {
-				window = lease
+			window := 15 * time.Minute // a fifth of the lease, at most 15 minutes (spec §5.5.4)
+			if i.LeaseMinutes > 0 {
+				window = min(window, time.Duration(i.LeaseMinutes)*time.Minute/5)
 			}
 			if i.ExpiresAt.Sub(now) <= window {
 				out = append(out, Warning{Code: "lease_expiring", Detail: i.ID + " expires at " + i.ExpiresAt.Format(time.RFC3339)})
